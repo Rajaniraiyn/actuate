@@ -54,3 +54,13 @@ The integrated overlay followed SkyLight input while the foreground PID and shar
 Formatting, workspace Clippy with warnings denied, and a macOS build without the native-capture feature passed. Native capture has a 15-second caller deadline, but macOS callbacks can finish work after that deadline. An output write failure may leave a partial destination file, which is never reported as a successful frame. These recovery cases remain follow-up work.
 
 The session now queues optional cursor visualization after SkyLight dispatch and exposes `cursor_state`. This integration is pending the final live test report. AX bounds-center selection remains a heuristic; controls with blank space inside their accessibility bounds require observed acceptance or a more precise point.
+
+## Compact presentation and viewport loop
+
+The compact-output iteration passed 34 core tests, 12 macOS tests and two overlay tests. Two permission-dependent capture unit tests remain skipped by default. Formatting, Clippy with warnings denied, and the macOS build without native capture passed. `tests/presentation_cli.py` checks native JSON preservation, text escaping, short-reference scope, output limits, and projected versus native diffs.
+
+A real NSScrollView fixture starts with Row 12 below its viewport. A reference-center SkyLight click at that point returns `outside_viewport` with no effect. Pixel scrolling moves the same reference inside, leaves Row 0 above, and produces those relation changes in `diff_view`. A subsequent SkyLight click updates the fixture's status to `clicked:12`. `tests/presentation_e2e.py` checks this complete loop and retains the raw observations beneath both text and compact JSON views.
+
+VS Code's focused window produced 540 nodes in one sample. The saved native JSON occupied 3,208,271 bytes; the interactive text projection of that same observation occupied 5,609 bytes and showed 64 candidates, with 476 filtered nodes explicitly counted. These are byte counts for different representations, not a claim of lossless compression or measured model-token counts. Native traversal completed, while native attribute errors remained reported.
+
+On that VS Code window, SkyLight selected Search and then restored Explorer with the original retained references. AXSelected confirmed both state changes. The initial global center hit test reported occlusion, which did not prevent the window-targeted route from working. The projected diff reported selection changes and newly displayed controls. No document content was edited or search submitted. The editor exposed an accessibility message asking for screen-reader mode, so this test does not establish full editor-text accessibility.

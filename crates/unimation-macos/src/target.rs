@@ -172,6 +172,84 @@ impl Accessibility {
 }
 
 impl Accessibility {
+    /// Known native scroll-area/window bounds constrain reference-center clicks.
+    /// This does not establish occlusion or clipping by arbitrary custom views.
+    pub fn require_point_in_viewport(&self, target: &ElementRef, point: &Point) -> Result<()> {
+        let mut element = self.resolve(target)?;
+        let mut seen = Vec::new();
+        for _ in 0..64 {
+            let role = attribute(&element, "AXRole")
+                .ok()
+                .and_then(|v| v.downcast::<CFString>().ok())
+                .map(|v| v.to_string());
+            if matches!(role.as_deref(), Some("AXScrollArea" | "AXWindow"))
+                && let Ok(rect) = bounds(&element)
+                && (point.x < rect.x
+                    || point.y < rect.y
+                    || point.x >= rect.x + rect.width
+                    || point.y >= rect.y + rect.height)
+            {
+                return Err(error(
+                    "outside_viewport",
+                    "Reference center is outside an observed native scroll area or window; scroll and observe again",
+                    Effect::None,
+                ));
+            }
+            seen.push(element.clone());
+            element = match attribute(&element, "AXParent").and_then(|v| {
+                v.downcast::<AXUIElement>()
+                    .map_err(|_| error("native_type", "Invalid AXParent", Effect::None))
+            }) {
+                Ok(parent) if !seen.iter().any(|v| **v == *parent) => parent,
+                _ => break,
+            };
+        }
+        Ok(())
+    }
+    /// Reject only explicit native hidden/minimized/disabled evidence. Missing
+    /// visibility attributes are unknown, never assumed hidden or visible.
+    pub fn require_pointer_access(&self, target: &ElementRef) -> Result<()> {
+        let mut element = self.resolve(target)?;
+        let mut seen = Vec::new();
+        for depth in 0..64 {
+            for (name, blocked) in [
+                ("AXHidden", true),
+                ("AXVisible", false),
+                ("AXMinimized", true),
+            ] {
+                if let Ok(value) = attribute(&element, name)
+                    && value
+                        .downcast_ref::<CFBoolean>()
+                        .is_some_and(|v| v.as_bool() == blocked)
+                {
+                    return Err(error(
+                        "not_visible",
+                        format!(
+                            "Native {name} blocks reference pointer input at ancestor depth {depth}"
+                        ),
+                        Effect::None,
+                    ));
+                }
+            }
+            if depth == 0
+                && let Ok(value) = attribute(&element, "AXEnabled")
+                && value
+                    .downcast_ref::<CFBoolean>()
+                    .is_some_and(|v| !v.as_bool())
+            {
+                return Err(error("disabled", "Element is disabled", Effect::None));
+            }
+            seen.push(element.clone());
+            element = match attribute(&element, "AXParent").and_then(|v| {
+                v.downcast::<AXUIElement>()
+                    .map_err(|_| error("native_type", "Invalid AXParent", Effect::None))
+            }) {
+                Ok(parent) if !seen.iter().any(|v| **v == *parent) => parent,
+                _ => break,
+            };
+        }
+        self.require_sheet_access(target)
+    }
     /// Native hit testing can see through an attached modal sheet. Check the
     /// owning window's advertised sheets before dispatching reference input.
     pub fn require_sheet_access(&self, target: &ElementRef) -> Result<()> {
@@ -233,7 +311,8 @@ impl Accessibility {
     /// Ensure a global coordinate still resolves to the requested element or one
     /// of its descendants. No focus or z-order mutations are performed.
     pub fn require_hit(&mut self, target: &ElementRef, point: &Point) -> Result<()> {
-        self.require_sheet_access(target)?;
+        self.require_pointer_access(target)?;
+        self.require_point_in_viewport(target, point)?;
         let intended = self.resolve(target)?;
         let hit = self.hit_test(point.clone())?;
         let mut element = self.resolve(&hit)?;

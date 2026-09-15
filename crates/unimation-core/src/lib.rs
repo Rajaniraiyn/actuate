@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod diff;
 pub mod geometry;
+pub mod presentation;
 pub mod query;
 pub use actions::*;
 // Independent provider capabilities. Native handles never cross this boundary.
@@ -8,6 +9,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// Output projection only; stored native observations are never rewritten.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputFormat {
+    Json,
+    Compact,
+    #[default]
+    Text,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElementRef {
@@ -159,6 +169,12 @@ pub trait Observe {
 pub trait SemanticActions {
     fn semantic(&mut self, target: &ElementRef, action: SemanticAction) -> Result<Receipt>;
 }
+/// Read-only, route-specific evidence. Reports must preserve unknown states;
+/// an observed pass never guarantees a later action will be consumed.
+pub trait Actionability {
+    type Report;
+    fn actionability(&mut self, target: &ElementRef) -> Result<Self::Report>;
+}
 pub trait PointerInput {
     fn pointer(&mut self, delivery: Delivery, action: PointerAction) -> Result<Receipt>;
 }
@@ -208,6 +224,23 @@ pub const fn default_max_depth() -> usize {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionRequest {
+    View {
+        #[serde(default)]
+        revision: Option<u64>,
+        #[serde(default)]
+        options: presentation::PresentationOptions,
+        #[serde(default)]
+        format: OutputFormat,
+    },
+    DiffView {
+        before: u64,
+        #[serde(default)]
+        after: Option<u64>,
+        #[serde(default)]
+        options: presentation::PresentationOptions,
+        #[serde(default = "default_view_changes")]
+        max_changes: usize,
+    },
     Discover {},
     Observe {
         request: ObserveRequest,
@@ -281,6 +314,10 @@ pub enum SessionRequest {
     Inspect {
         target: ElementRef,
     },
+}
+
+pub const fn default_view_changes() -> usize {
+    100
 }
 
 pub const fn default_wait_timeout() -> u64 {

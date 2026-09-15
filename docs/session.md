@@ -8,7 +8,11 @@ The authoritative request types are `unimation_core::SessionRequest`, `SemanticA
 | --- | --- | --- |
 | `discover` | None | Session, permission state, applications |
 | `observe` | `request: {pid, max_nodes?, max_depth?}` | Snapshot; budgets default to 1000 and 30 |
+| `snapshot` | `request`, optional `scope`, `options`, `format` | Observe, retain raw state and render in one request |
 | `observe_subtree` | `target`, optional `max_nodes` and `max_depth` | Snapshot rooted at a live reference |
+| `view` | Optional `revision`, `options`, `format` | Render a retained observation |
+| `diff_view` | `before`, optional `after`, `options`, `max_changes` | Bounded text diff of presentation fields |
+| `actionability` | `target` | Live native states and route-specific evidence; no input |
 | `inspect` | `target: {session, id}` | Attribute values and supported action names |
 | `attribute` | `target`, `name` | One native attribute value |
 | `semantic` | `target`, `action` | Dispatch receipt |
@@ -55,6 +59,24 @@ AX may advertise optional attributes that have no value. Their native `no_value`
 The implementation does not silently normalize native text, infer an action from a role, activate a target, or retry a mutation. An `unknown` effect means the caller must inspect the resulting state before deciding whether retry is safe. Route-specific native attribute names are intentional backend extensions.
 
 ## Snapshot queries and differences
+
+Raw `observe` results and the session JSONL transport remain unchanged by default. Explicit `snapshot` and `view` requests can return text or compact JSON. `session --format compact` projects raw observation responses while retaining JSONL framing. `session --format text` changes the outer CLI response into a framed text transcript; use the default JSONL mode for existing machine clients.
+
+```json
+{"op":"snapshot","request":{"pid":1234,"max_nodes":1000,"max_depth":30},"scope":"focused_window","format":"text","options":{"actionable_only":true,"max_nodes":80}}
+{"op":"view","revision":1,"format":"compact","options":{"hide_known_hidden":true,"max_nodes":80}}
+{"op":"view","revision":1,"format":"text","options":{"root":{"session":"SESSION","id":12},"max_text_chars":120}}
+{"op":"actionability","target":"@e12"}
+{"op":"diff_view","before":1,"after":2,"options":{"max_text_chars":120},"max_changes":50}
+```
+
+Use actual returned IDs. `snapshot` collects a new observation and retains its full raw data. `view` only renders a retained observation. `format:"json"` returns raw data; `format:"compact"` returns presentation rows and coverage; `format:"text"` returns a tree string. `options.max_nodes` limits displayed rows, separately from `request.max_nodes`, which limits native collection. The presentation defaults are 200 displayed nodes and 160 characters per preview. Unknown visibility is retained by `hide_known_hidden`.
+
+The new `snapshot` and `view` operations default to text when `format` is omitted. `snapshot.scope` defaults to `application`; request `focused_window` to resolve the focused AX window before collection. This is separate from the CLI `snapshot` alias of `observe`, which retains JSON output by default.
+
+`diff_view` compares projected fields and defaults to 100 emitted changes. It reports `entered_view`, `left_view`, omissions and uncertain coverage. It does not claim native destruction or equality of omitted attributes. The raw `diff` operation is unchanged and remains available for complete field-level evidence.
+
+Short references such as `"@e12"` are expanded in the current live session. They do not become valid in another process. Native JSON references retain their full session and numeric ID. See [presentation and visibility](presentation.md) for viewport hints, adapter contracts and the difference between an interactive candidate and route-specific actionability.
 
 ```json
 {"op":"query","query":{"role":{"kind":"exact","value":"AXButton"},"name":{"kind":"contains","value":"Equal"}}}

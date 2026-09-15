@@ -15,8 +15,34 @@ cmd observe help="Read the native accessibility tree for an application." {
     flag --max-depth default="30" {
         arg <MAX_DEPTH>
     }
+    flag --format default=json {
+        arg <FORMAT>
+    }
+    flag --interactive
+    flag --hide-hidden
+    flag --limit default="200" {
+        arg <LIMIT>
+    }
+    flag --scope default=application {
+        arg <SCOPE>
+    }
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <PID>
+}
+cmd view help="Render a saved native snapshot without changing its references." {
+    flag --format default=text {
+        arg <FORMAT>
+    }
+    flag --root {
+        arg <ROOT>
+    }
+    flag --interactive
+    flag --hide-hidden
+    flag --limit default="200" {
+        arg <LIMIT>
+    }
+    flag "-h --help" help="Print help" action=help builtin=#true
+    arg <SNAPSHOT>
 }
 cmd capture help="Capture the main display or an explicitly selected display/window." {
     flag --display {
@@ -45,6 +71,9 @@ cmd capabilities help="Report delivery routes and availability." {
 }
 cmd diff help="Compare two snapshots saved from the same live session." {
     flag --modified-only
+    flag --format default=json {
+        arg <FORMAT>
+    }
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <BEFORE>
     arg <AFTER>
@@ -69,5 +98,8 @@ cmd protocol help="Show JSON session commands and delivery semantics." {
     flag "-h --help" help="Print help" action=help builtin=#true
 }
 cmd session help="Read JSON requests from stdin, retaining references until EOF." {
+    flag --format help="JSONL is the machine protocol; text is a framed interactive transcript." default=json {
+        arg <FORMAT>
+    }
     flag "-h --help" help="Print help" action=help builtin=#true
 }

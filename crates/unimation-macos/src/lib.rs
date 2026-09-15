@@ -41,3 +41,6 @@ mod discovery;
 
 #[cfg(target_os = "macos")]
 pub mod overlay;
+
+#[cfg(target_os = "macos")]
+mod actionability;

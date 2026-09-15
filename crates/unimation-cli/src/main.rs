@@ -18,6 +18,30 @@ enum Command {
         max_nodes: usize,
         #[usage(long, default = "30")]
         max_depth: usize,
+        #[usage(long, default = "json")]
+        format: String,
+        #[usage(long)]
+        interactive: bool,
+        #[usage(long)]
+        hide_hidden: bool,
+        #[usage(long, default = "200")]
+        limit: usize,
+        #[usage(long, default = "application")]
+        scope: String,
+    },
+    /// Render a saved native snapshot without changing its references.
+    View {
+        snapshot: std::path::PathBuf,
+        #[usage(long, default = "text")]
+        format: String,
+        #[usage(long)]
+        root: Option<String>,
+        #[usage(long)]
+        interactive: bool,
+        #[usage(long)]
+        hide_hidden: bool,
+        #[usage(long, default = "200")]
+        limit: usize,
     },
     /// Capture the main display or an explicitly selected display/window.
     Capture {
@@ -43,6 +67,8 @@ enum Command {
         after: std::path::PathBuf,
         #[usage(long)]
         modified_only: bool,
+        #[usage(long, default = "json")]
+        format: String,
     },
     /// Query a saved snapshot without discarding fields from matching nodes.
     Query {
@@ -59,7 +85,11 @@ enum Command {
     /// Show JSON session commands and delivery semantics.
     Protocol,
     /// Read JSON requests from stdin, retaining references until EOF.
-    Session,
+    Session {
+        /// JSONL is the machine protocol; text is a framed interactive transcript.
+        #[usage(long, default = "json")]
+        format: String,
+    },
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::parse();
@@ -76,12 +106,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             before,
             after,
             modified_only,
+            format,
         } => {
             let before: unimation_core::Snapshot =
                 serde_json::from_reader(std::fs::File::open(before)?)?;
             let after: unimation_core::Snapshot =
                 serde_json::from_reader(std::fs::File::open(after)?)?;
             let diff = unimation_core::diff::diff_snapshots(&before, &after)?;
+            let format = parse_format(&format)?;
+            if format == unimation_core::OutputFormat::Compact {
+                if modified_only {
+                    return Err("--modified-only selects native fields; use --format json or text for that mode".into());
+                }
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "root": before.root, "before_revision": before.revision, "after_revision": after.revision,
+                        "text": unimation_core::presentation::render_view_diff(&before, &after, &Default::default(), 100)?
+                    })
+                );
+                return Ok(());
+            }
+            if format == unimation_core::OutputFormat::Text && !modified_only {
+                print!(
+                    "{}",
+                    unimation_core::presentation::render_view_diff(
+                        &before,
+                        &after,
+                        &Default::default(),
+                        100
+                    )?
+                );
+                return Ok(());
+            }
+            if format == unimation_core::OutputFormat::Text {
+                let mut diff = diff;
+                if modified_only {
+                    diff.newly_observed.clear();
+                    diff.removed_from_scope.clear();
+                    diff.no_longer_observed.clear();
+                }
+                print!(
+                    "{}",
+                    unimation_core::presentation::render_diff_text(&diff, 160)
+                );
+                return Ok(());
+            }
             let value = if modified_only {
                 serde_json::json!({"before_revision":diff.before_revision,"after_revision":diff.after_revision,"modified":diff.modified,"before_coverage":diff.before_coverage,"after_coverage":diff.after_coverage})
             } else {
@@ -89,6 +159,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
+        }
+        Command::View {
+            snapshot,
+            format,
+            root,
+            interactive,
+            hide_hidden,
+            limit,
+        } => {
+            let snapshot: unimation_core::Snapshot =
+                serde_json::from_reader(std::fs::File::open(snapshot)?)?;
+            let root = root
+                .map(|r| parse_short_ref(&snapshot.root.session, &r))
+                .transpose()?;
+            emit_snapshot(
+                &snapshot,
+                parse_format(&format)?,
+                &unimation_core::presentation::PresentationOptions {
+                    root,
+                    actionable_only: interactive,
+                    hide_known_hidden: hide_hidden,
+                    max_nodes: limit,
+                    ..Default::default()
+                },
+            )
         }
         Command::Query {
             snapshot,
@@ -121,7 +216,7 @@ fn run(_: Command) -> Result<(), Box<dyn std::error::Error>> {
 }
 #[cfg(target_os = "macos")]
 fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
-    use unimation_core::{Discover, Observe, ObserveRequest};
+    use unimation_core::{Discover, ObserveRequest};
     let mut ax = unimation_macos::Accessibility::new();
     let result = match command {
         Command::Discover => ax.discover()?,
@@ -129,11 +224,44 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             pid,
             max_nodes,
             max_depth,
-        } => serde_json::to_value(ax.observe(ObserveRequest {
-            pid,
-            max_nodes,
-            max_depth,
-        })?)?,
+            format,
+            interactive,
+            hide_hidden,
+            limit,
+            scope,
+        } => {
+            let format = parse_format(&format)?;
+            let scope = match scope.as_str() {
+                "application" => unimation_macos::session::SnapshotScope::Application,
+                "window" => unimation_macos::session::SnapshotScope::FocusedWindow,
+                _ => return Err("--scope must be application or window".into()),
+            };
+            let value = unimation_macos::session::MacSession::new().extension(
+                unimation_macos::session::MacRequest::Snapshot {
+                    request: ObserveRequest {
+                        pid,
+                        max_nodes,
+                        max_depth,
+                    },
+                    scope,
+                    format,
+                    options: unimation_core::presentation::PresentationOptions {
+                        actionable_only: interactive,
+                        hide_known_hidden: hide_hidden,
+                        max_nodes: limit,
+                        ..Default::default()
+                    },
+                },
+            )?;
+            if let Some(text) = value.as_str() {
+                print!("{text}");
+            } else if format == unimation_core::OutputFormat::Compact {
+                println!("{}", serde_json::to_string(&value)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            }
+            return Ok(());
+        }
         Command::Capture {
             path,
             display,
@@ -169,10 +297,14 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             .extension(unimation_macos::session::MacRequest::Windows {})?,
         Command::Capabilities => unimation_macos::session::MacSession::new()
             .extension(unimation_macos::session::MacRequest::Capabilities {})?,
-        Command::Session => {
-            return session();
+        Command::Session { format } => {
+            return session(parse_format(&format)?);
         }
-        Command::Spec | Command::Protocol | Command::Diff { .. } | Command::Query { .. } => {
+        Command::Spec
+        | Command::Protocol
+        | Command::Diff { .. }
+        | Command::Query { .. }
+        | Command::View { .. } => {
             unreachable!()
         }
     };
@@ -180,7 +312,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 #[cfg(target_os = "macos")]
-fn session() -> Result<(), Box<dyn std::error::Error>> {
+fn session(format: unimation_core::OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Value, json};
     use std::io::{BufRead, Write};
     let mut runtime = unimation_macos::session::MacSession::new();
@@ -203,8 +335,86 @@ fn session() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(id) = id {
             reply["id"] = id;
         }
-        println!("{}", serde_json::to_string(&reply)?);
+        if format == unimation_core::OutputFormat::Text {
+            println!(
+                "--- response id={} ---",
+                reply.get("id").unwrap_or(&Value::Null)
+            );
+            if let Some(result) = reply.get("result") {
+                if let Some(text) = result.as_str() {
+                    println!("{text}");
+                } else if let Ok(snapshot) =
+                    serde_json::from_value::<unimation_core::Snapshot>(result.clone())
+                {
+                    emit_snapshot(&snapshot, format, &Default::default())?;
+                } else {
+                    println!("{}", serde_json::to_string(result)?);
+                }
+            } else {
+                println!("{}", serde_json::to_string(&reply)?);
+            }
+            println!("--- end ---");
+        } else {
+            if format == unimation_core::OutputFormat::Compact
+                && let Some(result) = reply.get_mut("result")
+                && let Ok(snapshot) =
+                    serde_json::from_value::<unimation_core::Snapshot>(result.clone())
+            {
+                *result = serde_json::to_value(unimation_core::presentation::render_snapshot(
+                    &snapshot,
+                    &Default::default(),
+                )?)?;
+            }
+            println!("{}", serde_json::to_string(&reply)?);
+        }
         std::io::stdout().flush()?;
+    }
+    Ok(())
+}
+
+fn parse_format(value: &str) -> Result<unimation_core::OutputFormat, Box<dyn std::error::Error>> {
+    match value {
+        "json" => Ok(unimation_core::OutputFormat::Json),
+        "compact" => Ok(unimation_core::OutputFormat::Compact),
+        "text" => Ok(unimation_core::OutputFormat::Text),
+        _ => Err("--format must be text, compact, or json".into()),
+    }
+}
+fn parse_short_ref(
+    session: &str,
+    value: &str,
+) -> Result<unimation_core::ElementRef, Box<dyn std::error::Error>> {
+    let id = value
+        .strip_prefix("@e")
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or("--root must be @e<number> from the saved snapshot")?
+        .parse::<u64>()?;
+    Ok(unimation_core::ElementRef {
+        session: session.into(),
+        id,
+    })
+}
+fn emit_snapshot(
+    snapshot: &unimation_core::Snapshot,
+    format: unimation_core::OutputFormat,
+    options: &unimation_core::presentation::PresentationOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match format {
+        unimation_core::OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(snapshot)?)
+        }
+        unimation_core::OutputFormat::Compact => println!(
+            "{}",
+            serde_json::to_string(&unimation_core::presentation::render_snapshot(
+                snapshot, options
+            )?)?
+        ),
+        unimation_core::OutputFormat::Text => print!(
+            "{}",
+            unimation_core::presentation::render_snapshot_text(
+                &unimation_core::presentation::render_snapshot(snapshot, options)?
+            )
+        ),
     }
     Ok(())
 }

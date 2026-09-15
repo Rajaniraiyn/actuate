@@ -40,6 +40,10 @@ Use returned references, never guessed IDs. Input requires an explicit route. Re
 
 Sessions retain the latest 32 snapshots and 32 captures. `query` filters a retained snapshot without removing native attributes from returned nodes. `diff` compares increasing revisions of the same root and reports field changes, new observations, scope removals and uncertain absence separately. Querying and diffing do not refresh the UI; observe again after an action.
 
+Raw JSON remains the default for `observe` and `session`. Use `observe 1234 --format text` for a bounded tree, `--format compact` for structured presentation rows, or `view snapshot.json --root @e12 --interactive` to render a saved subtree. Presentation keeps native references and raw observations intact. Collection limits and displayed-row limits are separate. See [compact output and visibility](docs/presentation.md).
+
+The live `actionability` session request reports native states, geometry, attached-sheet checks and a sampled global center hit test. An interactive row is a candidate, not a clickability guarantee. Hidden, offscreen, occluded and unknown are different states, and global-pointer evidence does not determine SkyLight delivery.
+
 Native ScreenCaptureKit screenshots are the default on macOS 14+. Request `backend: "executable"` to use the separate `screencapture` provider; there is no implicit fallback. Native capture supports `max_pixel_edge` downscaling. Image clicks reject changed geometry and frames predating a session input dispatch. These checks cannot detect every external UI change.
 
 The optional [Rust cursor overlay](crates/unimation-overlay/README.md) runs as a separate visual process. It draws a synthetic cursor and never injects input. Start it through `cursor_overlay` with an explicit executable path to visualize subsequent SkyLight pointer dispatches. It starts hidden. `cursor_state` reports dispatch state and visual errors; neither is proof of application consumption or completed rendering.
@@ -65,6 +69,9 @@ open -a Calculator
 python3 tests/macos_e2e.py
 python3 tests/skylight_e2e.py
 python3 tests/extended_macos_e2e.py
+python3 tests/presentation_cli.py
+xcrun swiftc native/macos/scroll_fixture.swift -o native/macos/.build/scroll_fixture -framework AppKit
+python3 tests/presentation_e2e.py
 ```
 
 The native test changes Calculator's expression, briefly opens a disposable fixture, and moves the pointer. It exercises semantic setters, Unicode input, and pointer delivery. It reports known process-directed pointer limitations separately from successful global-route tests. `tests/skylight_e2e.py` exercises the separate private window-targeted provider. See [observed results](docs/validation.md) and the [session protocol](docs/session.md).

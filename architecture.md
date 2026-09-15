@@ -1,6 +1,6 @@
 # Unimation architecture
 
-Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. See [README](README.md), [backend tasks](docs/backends.md), [SkyLight details](docs/skylight.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
+Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, compact text and JSON presentation adapters, viewport hints, live actionability evidence, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. See [README](README.md), [backend tasks](docs/backends.md), [presentation and viewport behavior](docs/presentation.md), [SkyLight details](docs/skylight.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
 
 Status: working design. Command names and Rust contracts below describe the target architecture unless identified as implemented in the linked implementation documentation. Research evidence alone does not establish runtime support.
 
@@ -647,6 +647,20 @@ postcondition_failed     observation_incomplete  deadline_exceeded
 Errors include the failed phase, target, relevant observations, completed sequence prefix, and supported recovery actions. Avoid generic "click failed" when the runtime knows a sheet is blocking the target.
 
 Normal responses stay compact. Put native errors, routing decisions, and detailed diagnostics in structured metadata or trace output. Always surface changed target identity, uncertain outcomes, new blocking surfaces, and incomplete cleanup.
+
+### Presentation adapters and viewport evidence
+
+Keep retained native observations immutable. A presentation adapter interprets backend attributes into display roles, names, values, states and geometry. The generic renderer handles hierarchy, short references, text previews, filtering and output limits. A backend-specific name or role mapping must not become an assumption in the portable renderer. Native attributes and unknown values remain available through raw snapshots and inspection. Selecting text or compact JSON is an explicit output choice; existing JSON command and session defaults remain compatible.
+
+Use a window, sheet, document or web area as the observation scope when the task concerns that region. Application roots can include entire menu hierarchies and unrelated windows. Applying a display filter after a broad traversal reduces output but does not reduce native reads or restore nodes missed by a traversal budget. Expose both collection limits and presentation limits, with separate incomplete-coverage and omitted-output counts.
+
+A viewport hint expresses an intersection in a declared coordinate system. It can support a geometric inside/outside/unknown result; it does not prove that pixels are visible or that input will arrive. Keep native hidden state, ancestor clipping, minimization, display intersection, modal blocking and point hit testing separate. Unknown geometry stays unknown. A global pointer check samples the actual desktop hit target, while a targeted SkyLight route may reach a covered window. Neither route can reuse an old presentation badge as action authorization.
+
+Projected diffs compare displayed fields for the same retained references. A node leaving the viewport or a filter is an output omission, never evidence of destruction. Preserve the raw semantic diff for attribute changes, complete-scope absence and uncertain observations. Bound changed-row and text output too; do not replace one overwhelming snapshot with an unbounded diff. A stable projected view may hide changes in omitted attributes, so report that distinction explicitly.
+
+For scrolling, observe the intended scroll container, apply a bounded route-specific scroll, observe it again, and compare the same scope. Track both content and geometry progress. An unchanged projection may mean no movement, repeated virtualized content, a hidden change or failed delivery; it does not prove end-of-list. Stop on a caller limit or verified terminal condition and retain uncertainty otherwise. The first implementation provides the component operations; automatic scroll-until orchestration and generalized clipping/occlusion providers remain separate work.
+
+Agent-browser's text snapshot flags and line-level diff inform the command presentation. Browser-use's enhanced snapshot code retains layout, scroll rectangles and paint order separately. These are useful inputs for a browser adapter, not a universal visibility contract for native applications. See [presentation design and sources](docs/presentation.md).
 
 Page/app content is untrusted observation data. It must not become runtime configuration or permission authority. Keep secret field values and unrestricted text capture out of default logs; diagnostic recording is explicit and configurable.
 

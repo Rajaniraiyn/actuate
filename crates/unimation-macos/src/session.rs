@@ -15,9 +15,25 @@ use serde_json::{Value, json};
 use std::{collections::VecDeque, path::PathBuf};
 use unimation_core::*;
 
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotScope {
+    #[default]
+    Application,
+    FocusedWindow,
+}
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MacRequest {
+    Snapshot {
+        request: ObserveRequest,
+        #[serde(default)]
+        scope: SnapshotScope,
+        #[serde(default)]
+        options: presentation::PresentationOptions,
+        #[serde(default)]
+        format: OutputFormat,
+    },
     Capture {
         source: CaptureSource,
         path: PathBuf,
@@ -30,6 +46,9 @@ pub enum MacRequest {
     Windows {},
     Capabilities {},
     CursorState {},
+    Actionability {
+        target: ElementRef,
+    },
     /// Starts hidden; follows subsequently dispatched SkyLight pointer packets.
     CursorOverlay {
         action: CursorOverlayAction,
@@ -188,7 +207,8 @@ impl MacSession {
         if !matches!(mode, ClickMode::Semantic)
             && let Some(target) = target
         {
-            self.ax.require_sheet_access(target)?;
+            self.ax.require_pointer_access(target)?;
+            self.ax.require_point_in_viewport(target, &point)?;
         }
         match mode {
             ClickMode::Semantic => {
@@ -260,6 +280,12 @@ impl MacSession {
         if let Some(object) = value.as_object_mut() {
             object.remove("id");
         }
+        for pointer in ["/target", "/options/root"] {
+            if let Some(short) = value.pointer(pointer).and_then(Value::as_str) {
+                let expanded = json!(self.ax.expand_reference(short)?);
+                *value.pointer_mut(pointer).expect("existing field") = expanded;
+            }
+        }
         let extension = matches!(
             value["op"].as_str(),
             Some(
@@ -273,6 +299,8 @@ impl MacSession {
                     | "skylight_pointer"
                     | "cursor_state"
                     | "cursor_overlay"
+                    | "actionability"
+                    | "snapshot"
             )
         );
         if extension {
@@ -303,6 +331,18 @@ impl MacSession {
     }
     fn execute_core(&mut self, request: SessionRequest) -> Result<Value> {
         match request {
+            SessionRequest::View { revision, options, format } => {
+                let snapshot = self.snapshot(revision)?;
+                if format == OutputFormat::Json { return Ok(json!(snapshot)); }
+                let view = presentation::render_snapshot(snapshot, &options)?;
+                Ok(match format {
+                    OutputFormat::Text => json!(presentation::render_snapshot_text(&view)),
+                    _ => json!(view),
+                })
+            },
+            SessionRequest::DiffView { before, after, options, max_changes } => {
+                Ok(json!(presentation::render_view_diff(self.snapshot(Some(before))?, self.snapshot(after)?, &options, max_changes)?))
+            },
             SessionRequest::ParameterizedAttribute{target,name,parameter}=>self.ax.read_parameterized(&target,&name,parameter),
             SessionRequest::WaitAttribute{target,name,expected,timeout_ms}=>{
                 if timeout_ms>60_000{return Err(fail("invalid_request","Wait timeout must be <=60000ms"));}
@@ -343,6 +383,46 @@ impl MacSession {
     }
     fn execute_extension(&mut self, request: MacRequest) -> Result<Value> {
         match request {
+            MacRequest::Snapshot {
+                request,
+                scope,
+                options,
+                format,
+            } => {
+                let snapshot = match scope {
+                    SnapshotScope::Application => self.ax.observe(request)?,
+                    SnapshotScope::FocusedWindow => {
+                        let app = self.ax.observe(ObserveRequest {
+                            pid: request.pid,
+                            max_nodes: 1,
+                            max_depth: 0,
+                        })?;
+                        let window = self.ax.read_attribute(&app.root, "AXFocusedWindow")?;
+                        let reference: ElementRef = serde_json::from_value(window["value"].clone())
+                            .map_err(|_| {
+                                fail(
+                                    "no_window",
+                                    "Application has no focused AX window; use application scope",
+                                )
+                            })?;
+                        self.ax
+                            .observe_subtree(&reference, request.max_nodes, request.max_depth)?
+                    }
+                };
+                let result = if format == OutputFormat::Json {
+                    json!(snapshot)
+                } else {
+                    let view = presentation::render_snapshot(&snapshot, &options)?;
+                    if format == OutputFormat::Text {
+                        json!(presentation::render_snapshot_text(&view))
+                    } else {
+                        json!(view)
+                    }
+                };
+                self.remember(snapshot);
+                Ok(result)
+            }
+            MacRequest::Actionability { target } => self.ax.actionability(&target),
             MacRequest::CursorState {} => {
                 let alive = match self.overlay.as_mut() {
                     Some(o) => o.is_running()?,
@@ -475,7 +555,7 @@ impl MacSession {
                     }
                     (CaptureSource::Window { window_id }, ClickMode::Global) => {
                         let hit = self.ax.hit_test(point.clone())?;
-                        self.ax.require_sheet_access(&hit)?;
+                        self.ax.require_pointer_access(&hit)?;
                         let actual = self.ax.native_window(&hit)?;
                         if actual.window_id != *window_id
                             || Some(actual.pid as i64) != frame.owner_pid
@@ -543,7 +623,7 @@ impl MacSession {
                         "Window coordinates require a pointer route",
                     ));
                 }
-                self.ax.require_sheet_access(&target)?;
+                self.ax.require_pointer_access(&target)?;
                 let w = self.ax.native_window(&target)?;
                 if !point.x.is_finite()
                     || !point.y.is_finite()
@@ -587,7 +667,7 @@ impl MacSession {
                 }
             }
             MacRequest::SkylightPointer { target, action } => {
-                self.ax.require_sheet_access(&target)?;
+                self.ax.require_pointer_access(&target)?;
                 let (point, action) = match action {
                     PointerAction::Move { point } => (
                         point,
@@ -648,7 +728,7 @@ impl MacSession {
                 vertical,
                 horizontal,
             } => {
-                self.ax.require_sheet_access(&target)?;
+                self.ax.require_pointer_access(&target)?;
                 let point = self.ax.element_center(&target)?;
                 let receipt = match mode {
                     ClickMode::Skylight => {

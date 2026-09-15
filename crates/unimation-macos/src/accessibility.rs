@@ -56,6 +56,7 @@ pub(crate) fn attribute(element: &AXUIElement, name: &str) -> Result<CFRetained<
     let mut raw = ptr::null();
     // SAFETY: valid retained element/string and initialized out pointer. Copy returns +1 ownership.
     unsafe {
+        check(element.set_messaging_timeout(2.0), "Set AX timeout", false)?;
         check(
             element.copy_attribute_value(&CFString::from_str(name), NonNull::from(&mut raw)),
             name,
@@ -112,6 +113,26 @@ impl Accessibility {
             revision: 0,
             _thread_bound: PhantomData,
         }
+    }
+    /// Short display references are valid only inside this retained provider session.
+    pub fn expand_reference(&self, short: &str) -> Result<ElementRef> {
+        let id = short
+            .strip_prefix("@e")
+            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                error(
+                    "invalid_reference",
+                    "Expected a session-local @e<number> reference",
+                    Effect::None,
+                )
+            })?;
+        let reference = ElementRef {
+            session: self.session.clone(),
+            id,
+        };
+        self.resolve(&reference)?;
+        Ok(reference)
     }
     pub fn is_trusted() -> bool {
         // SAFETY: permission query has no arguments and does not prompt.
