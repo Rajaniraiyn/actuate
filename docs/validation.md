@@ -128,3 +128,43 @@ Both test devices were shut down and deleted, then their temporary device set an
 screenshots were removed. The default device-set UUID list matched its pre-test list.
 The reproducible test is `tests/ios_simulator_e2e.py`; API and limitations are in
 [the iOS guide](ios.md).
+
+
+## Composed iOS input and shared overlay, 2026-09-16
+
+A second disposable portrait iPad validated the composed library session after moving it
+out of the CLI. Native hardware Home returned to the home screen. A normalized touch tap
+opened Settings. A native press focused search and USB HID usage 4 entered `A`; iPadOS
+capitalized the key. Tests therefore distinguish keyboard events from exact Unicode text.
+
+A top-edge touch swipe opened Control Center. This fresh simulator exposed its header,
+Add Controls and Power, but did not display the populated controls seen in the earlier
+macOS Control Center test. No guest settings values were changed. A later integrated test
+used an explicit AX point scope to read home icons, pressed Settings, typed USB HID usage
+5 into search, opened Control Center by edge swipe and captured its PNG dimensions.
+`tests/ios_system_e2e.py` reproduces that sequence on a caller-owned disposable portrait iPad.
+
+Frontmost Home observation returned DockFolderViewService with one node. An explicit
+AX hit test at 100,100 returned a nine-node container with widgets and app icons;
+400,500 returned a calendar heading. This demonstrates why frontmost application scope
+must not be treated as complete OS observation. Explicit SpringBoard PID translation
+returned no root on this host and remains an availability-dependent operation.
+
+The experimental native mouse service accepted enable, relative movement and removal.
+The host cursor remained exactly at 696.65625,562.8125 throughout the agent's check.
+Captures did not establish visible guest cursor movement or click consumption. The mouse
+provider stays explicitly activated, separate from touch, and outside the default JSONL
+session. A native pointer constructor test passed without dispatch; its default test is
+ignored because it requires the installed private framework.
+
+The overlay's shared process controller and command model moved into the overlay library.
+AppKit rendering remains the implemented renderer; other platform renderers return explicit
+unavailable results. Typed capability composition includes a compile-fail test proving that
+an absent input provider cannot be used for touch. The typed session example verifies that
+returned observations share the cache allocation through `Arc`.
+
+The composed workspace finished with 69 unit tests and one compile-fail documentation
+test passing, plus three native/permission-dependent tests ignored. All-feature build
+and strict Clippy passed. The standalone iOS binary also passed live streamed-snapshot,
+explicit-null request ID and malformed-request recovery checks. The disposable iPad
+was shut down and deleted; its data directory and test captures were removed.

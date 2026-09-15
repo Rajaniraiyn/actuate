@@ -1,4 +1,7 @@
-use super::*;
+use overlay::{CursorCommand as Command, interpolate};
+fn appkit_origin(x: f64, y: f64, main_height: f64) -> (f64, f64) {
+    (x - 8., main_height - y - 40.)
+}
 use block2::RcBlock;
 use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::*;
@@ -173,4 +176,12 @@ pub fn run() {
     let _timer =
         unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(1. / 60., true, &block) };
     app.run();
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn desktop_coordinates() {
+        assert_eq!(super::appkit_origin(-200., -50., 1080.), (-208., 1090.));
+    }
 }

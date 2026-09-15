@@ -8,9 +8,18 @@ license.workspace = true
 unimation.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+usage = { workspace = true, optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", features = ["NSString", "NSUUID"] }
 objc2-core-foundation = "0.3.2"
 block2 = "0.6.2"
+
+[features]
+cli = ["dep:usage"]
+
+[[bin]]
+name = "unimation-ios"
+path = "src/bin/unimation-ios.rs"
+required-features = ["cli"]

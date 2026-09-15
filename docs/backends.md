@@ -47,7 +47,7 @@ There is no guest app, Swift helper, XCTest installation, or host-global input f
 
 `observe_frontmost` reads the guest application's translated hierarchy and retains native
 element identities. `SemanticActions` invokes advertised actions. Complete native property
-enumeration, HID touch/text, physical-device transport and screenshot-to-touch mapping
+enumeration, exact Unicode text, physical-device transport and screenshot-to-touch mapping
 remain separate work. `complete=false` explicitly marks the selected attribute coverage.
 A callback response deadline is not a deadline for the whole synchronous observation.
 
@@ -59,3 +59,7 @@ The library does not delete arbitrary device-set directories on drop. The creato
 shutdown, device deletion and removal of its temporary directory.
 
 See [iOS session usage and validation](ios.md).
+
+The iOS crate now also owns typed sessions and the JSONL adapter. Independent HID
+providers implement touch, hardware controls and keyboard input. Shared provider and
+overlay boundaries are described in [composition](composition.md).

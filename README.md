@@ -96,3 +96,8 @@ cargo run -p cli -- ios-session --udid DEVICE_UUID --device-set /absolute/device
 Use an already-installed runtime. The session connects to a booted device without
 installing a guest app. [The iOS guide](docs/ios.md) describes native semantic actions,
 compact snapshots, diffs, temporary device cleanup and current limitations.
+
+[Provider composition](docs/composition.md) documents typed capability injection,
+platform-owned sessions and the shared overlay library. The optional standalone iOS
+command is built with `cargo build -p ios --features cli`. Rust embeddings call the
+library directly and do not need either CLI executable.

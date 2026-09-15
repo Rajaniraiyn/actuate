@@ -1,6 +1,3 @@
-#[cfg(target_os = "macos")]
-mod ios_session;
-
 use usage::{Cli, Subcommands};
 
 #[derive(Cli)]
@@ -241,7 +238,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             sim.list()?
         }
         Command::IosSession { udid, device_set } => {
-            return ios_session::run(&udid, &device_set);
+            return ios::jsonl::run(&udid, &device_set);
         }
         Command::Discover { format, scope } => {
             let format = parse_format(&format)?;

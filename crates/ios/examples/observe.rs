@@ -5,7 +5,13 @@ fn main() {
         ios::SimulatorAccessibility::connect(&args[1], std::path::Path::new(&args[2])).unwrap();
     println!(
         "{}",
-        serde_json::to_string_pretty(&a.observe_frontmost(100, 12).unwrap()).unwrap()
+        serde_json::to_string_pretty(&if let Some(pid) = args.get(3) {
+            a.observe_application(pid.parse().unwrap(), 100, 12)
+                .unwrap()
+        } else {
+            a.observe_frontmost(100, 12).unwrap()
+        })
+        .unwrap()
     );
 }
 

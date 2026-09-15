@@ -11,6 +11,6 @@ path = "src/main.rs"
 unimation.workspace = true
 macos.workspace = true
 serde_json.workspace = true
-usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics"] }
+usage.workspace = true
 serde.workspace = true
 ios.workspace = true

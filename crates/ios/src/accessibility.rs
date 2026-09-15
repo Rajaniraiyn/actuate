@@ -9,7 +9,7 @@ use objc2::{
     runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel},
     sel,
 };
-use objc2_core_foundation::CGRect;
+use objc2_core_foundation::{CGPoint, CGRect};
 use objc2_foundation::{NSObject, NSString, NSUUID};
 use serde_json::{Value, json};
 use std::{
@@ -332,6 +332,35 @@ impl SimulatorAccessibility {
         }
     }
     pub fn observe_frontmost(&mut self, max_nodes: usize, max_depth: usize) -> Result<Snapshot> {
+        self.observe_selected(SimulatorScope::Frontmost, max_nodes, max_depth)
+    }
+    /// Query one guest application explicitly. The PID is the guest PID, not a
+    /// host app PID. This does not activate the application.
+    pub fn observe_application(
+        &mut self,
+        pid: i32,
+        max_nodes: usize,
+        max_depth: usize,
+    ) -> Result<Snapshot> {
+        self.observe_selected(SimulatorScope::Application { pid }, max_nodes, max_depth)
+    }
+    /// Hit-test and observe the returned subtree in AX translator coordinates.
+    /// Coordinates are not screenshot pixels or normalized HID ratios.
+    pub fn observe_at_point(
+        &mut self,
+        x: f64,
+        y: f64,
+        max_nodes: usize,
+        max_depth: usize,
+    ) -> Result<Snapshot> {
+        self.observe_selected(SimulatorScope::Point { x, y }, max_nodes, max_depth)
+    }
+    fn observe_selected(
+        &mut self,
+        scope: SimulatorScope,
+        max_nodes: usize,
+        max_depth: usize,
+    ) -> Result<Snapshot> {
         objc2::rc::autoreleasepool(|_| unsafe {
             if max_nodes == 0 {
                 return Err(error(
@@ -342,11 +371,43 @@ impl SimulatorAccessibility {
             }
             self.timed_out.store(false, Ordering::Release);
             let token = NSString::from_str(&self.token);
-            let translation: *mut AnyObject = msg_send![&*self.translator,frontmostApplicationWithDisplayId:0u32,bridgeDelegateToken:&*token];
+            let translation: *mut AnyObject = match scope {
+                SimulatorScope::Frontmost => {
+                    msg_send![&*self.translator,frontmostApplicationWithDisplayId:0u32,bridgeDelegateToken:&*token]
+                }
+                SimulatorScope::Application { pid } => {
+                    if pid <= 0 {
+                        return Err(error(
+                            "invalid_pid",
+                            "Guest PID must be positive",
+                            Effect::None,
+                        ));
+                    }
+                    require(
+                        Retained::as_ptr(&self.translator) as *mut _,
+                        sel!(translationApplicationObjectForPid:),
+                    )?;
+                    msg_send![&*self.translator,translationApplicationObjectForPid:pid]
+                }
+                SimulatorScope::Point { x, y } => {
+                    if !x.is_finite() || !y.is_finite() {
+                        return Err(error(
+                            "invalid_coordinate",
+                            "AX coordinates must be finite",
+                            Effect::None,
+                        ));
+                    }
+                    require(
+                        Retained::as_ptr(&self.translator) as *mut _,
+                        sel!(objectAtPoint:displayId:bridgeDelegateToken:),
+                    )?;
+                    msg_send![&*self.translator,objectAtPoint:CGPoint{x,y},displayId:0u32,bridgeDelegateToken:&*token]
+                }
+            };
             if translation.is_null() {
                 return Err(error(
                     "bridge_unavailable",
-                    "No frontmost application",
+                    "No native element for the requested simulator scope",
                     Effect::None,
                 ));
             }
@@ -638,6 +699,26 @@ impl Drop for SimulatorAccessibility {
         routes().lock().unwrap().remove(&self.token);
         self.elements.clear();
         let _ = &self.device;
+    }
+}
+
+/// Explicit native scope. Frontmost does not imply the whole display. Guest
+/// application selection and point hit-testing do not activate or focus UI.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum SimulatorScope {
+    Frontmost,
+    Application { pid: i32 },
+    Point { x: f64, y: f64 },
+}
+impl unimation::ObserveScope for SimulatorAccessibility {
+    type Scope = SimulatorScope;
+    fn observe_scope(
+        &mut self,
+        scope: Self::Scope,
+        budget: unimation::ObservationBudget,
+    ) -> Result<Snapshot> {
+        self.observe_selected(scope, budget.max_nodes, budget.max_depth)
     }
 }
 

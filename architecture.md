@@ -839,3 +839,25 @@ HID input, full property enumeration, scene/display roots, validated pixel mappi
 physical devices remain distinct capabilities to implement. See `docs/ios.md` for API
 contracts, ownership, deadlines and limitations. Disposable test device sets reuse an
 installed runtime and are shut down and removed after validation.
+
+
+### Typed composition and iOS ownership update
+
+Portable `Backend<O, I, C, V, A>` composition now lives in `unimation`. Observation and
+semantic actions share their native reference owner; input, capture, cursor rendering
+and app lifecycle are injected independently. Missing providers implement no capability
+traits. `ObserveScope` leaves scope identity to the provider, and mobile touch, USB HID
+keyboard, hardware buttons and native relative pointer input have distinct contracts.
+Normalized raw-framebuffer points are validated values, not interchangeable AX points.
+
+The iOS crate owns typed session execution, shared snapshot history, its JSONL adapter
+and optional standalone binary. The umbrella CLI delegates. Typed execution does not
+serialize between providers; snapshots use shared ownership. No guest executable is
+installed or embedded. Future helper artifacts belong to the provider that requires them.
+
+Native implementation gates belong at crate/module roots. The current iOS implementation
+is a macOS Simulator host, not guest code targeting iOS. Temporary simulator lifecycle
+remains a test-script responsibility. The overlay crate owns platform-neutral protocol,
+animation and controller APIs, with AppKit rendering and explicit unsupported modules
+for the other platforms. Native mouse input is independent from visual cursor rendering.
+See `docs/composition.md` and `docs/ios.md` for the current contracts and tested limits.

@@ -58,6 +58,7 @@ dependencies = [
  "serde",
  "serde_json",
  "unimation",
+ "usage-rs",
 ]
 
 [[package]]
@@ -93,6 +94,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-image-io",
  "objc2-screen-capture-kit",
+ "overlay",
  "serde",
  "serde_json",
  "unimation",
@@ -228,6 +230,7 @@ dependencies = [
  "objc2-foundation",
  "serde",
  "serde_json",
+ "unimation",
 ]
 
 [[package]]

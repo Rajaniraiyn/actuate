@@ -1,15 +1,12 @@
 //! Direct macOS providers using objc2 framework bindings. Optional visual overlay helper.
 //! Native objects stay on the creating thread; no unsafe Send/Sync implementations.
-#[cfg(target_os = "macos")]
+#![cfg(target_os = "macos")]
+
 mod accessibility;
-#[cfg(target_os = "macos")]
 mod input;
-#[cfg(target_os = "macos")]
 pub use accessibility::Accessibility;
-#[cfg(target_os = "macos")]
 pub use input::QuartzInput;
 
-#[cfg(target_os = "macos")]
 fn error(
     code: impl ToString,
     message: impl ToString,
@@ -22,25 +19,36 @@ fn error(
     }
 }
 
-#[cfg(target_os = "macos")]
 pub mod capture;
-#[cfg(target_os = "macos")]
 pub mod skylight;
 
-#[cfg(target_os = "macos")]
 pub mod target;
 
-#[cfg(target_os = "macos")]
 pub mod session;
 
-#[cfg(all(target_os = "macos", feature = "native-capture"))]
+#[cfg(feature = "native-capture")]
 pub mod capture_native;
 
-#[cfg(target_os = "macos")]
 mod discovery;
 
-#[cfg(target_os = "macos")]
 pub mod overlay;
 
-#[cfg(target_os = "macos")]
 mod actionability;
+
+impl unimation::ObserveScope for Accessibility {
+    type Scope = i32;
+    fn observe_scope(
+        &mut self,
+        pid: i32,
+        budget: unimation::ObservationBudget,
+    ) -> unimation::Result<unimation::Snapshot> {
+        unimation::Observe::observe(
+            self,
+            unimation::ObserveRequest {
+                pid,
+                max_nodes: budget.max_nodes,
+                max_depth: budget.max_depth,
+            },
+        )
+    }
+}

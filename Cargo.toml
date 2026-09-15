@@ -13,3 +13,5 @@ serde_json = "1"
 unimation = { path = "crates/unimation" }
 macos = { path = "crates/macos" }
 ios = { path = "crates/ios" }
+usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics"] }
+overlay = { path = "crates/overlay" }

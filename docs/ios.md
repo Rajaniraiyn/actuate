@@ -3,6 +3,7 @@
 The `ios` crate runs on a macOS host and connects to one explicitly selected simulator.
 iPhone and iPad use the same backend; the runtime's device family determines the guest UI.
 This does not implement automation of a physical iPhone or iPad.
+See [provider composition](composition.md) for the typed embedding and transport boundaries.
 
 ## Installed runtimes and isolated devices
 
@@ -26,11 +27,16 @@ not perform deletion in `Drop`, where errors would be difficult to report.
 using an available installed iOS runtime. It installs no guest applications. First boot
 still initializes guest data temporarily; the test removes its devices and directory.
 
-## JSONL session
+## Typed sessions and JSONL
 
 ```sh
 unimation ios-session --udid DEVICE_UUID --device-set /absolute/device/set
 ```
+
+Rust callers use `ios::session::connect` and typed `Session::execute` directly.
+`ios::jsonl` owns the optional agent transport; there is no session implementation in the
+umbrella CLI. The platform-owned `unimation-ios session` binary is available with the
+iOS crate's optional `cli` feature.
 
 Each line is one request. Replies contain `result` or a structured `error`. Optional `id`
 values are echoed. Unknown fields and unsupported operations are rejected. The device
@@ -53,6 +59,29 @@ The session retains its latest 32 observations. `view`, `query`, `diff` and `dif
 operate on those revisions with the same core query/diff/presentation functions as macOS.
 A short `@eN` target resolves only within this session. Full `{session,id}` references are
 also accepted. Navigation completion must be verified through observation.
+
+Touch, hardware keys and keyboard requests are explicit:
+
+```json
+{"op":"button","button":"home"}
+{"op":"touch","action":{"kind":"tap","point":{"x":0.5,"y":0.5}}}
+{"op":"touch","action":{"kind":"swipe","from":{"x":0.98,"y":0.001},"to":{"x":0.98,"y":0.55},"duration_ms":600,"edge":"top"}}
+{"op":"hid_key","usage":4,"modifiers":[]}
+```
+
+These touch ratios address the raw unrotated framebuffer. They are not AX points.
+Keyboard usages belong to USB HID page 0x07; guest keyboard layout and capitalization
+can change the resulting text. Hardware controls have real guest effects.
+
+`observe` and `snapshot` optionally accept `scope`, defaulting to `"frontmost"`.
+`{"point":{"x":100,"y":100}}` selects a native AX hit-test subtree in translator
+coordinates. `{"application":{"pid":123}}` attempts an explicit guest application
+translation. These are separate observation requests, not implicit fallback routes.
+The SpringBoard PID translation returned no native root on the validation host.
+The native point scope did return a home-icon container containing Settings, which a
+semantic press successfully opened. This is a hit-tested subtree, not a full-display root.
+A frontmost result may identify a service such as DockFolderViewService and omit home
+icons; it must not be presented as a complete display inventory.
 
 ## Native bridge and ownership
 
@@ -77,8 +106,11 @@ worker-process isolation remains future work. Keep the provider on its owning th
 - Reads known translated attributes rather than enumerating every native property.
   Snapshots therefore report `complete=false`; `traversal_complete` separately reports
   whether the requested hierarchy traversal finished within its limits.
-- Does not yet expose HID touch, gestures, keyboard/text injection, value setters,
-  system-wide display roots, multi-app scene selection, or physical-device services.
+- Does not yet expose exact Unicode text injection, value setters, a complete
+  system-wide display root, multi-app scene selection, or physical-device services.
+- The separate native guest mouse provider is experimental. Service creation and
+  dispatch worked; visible cursor movement and pointer click consumption were not verified.
+  It is not enabled by default or exposed as an implicit touch fallback.
 - Screenshots use simctl's native PNG output. There is no validated screenshot-to-touch
   mapping, so capture results explicitly report `click_mapping: null`.
 - References are retained for the session. Destruction notifications, retirement and

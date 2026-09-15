@@ -1,3 +1,5 @@
+pub mod composition;
+pub use composition::*;
 pub mod actions;
 pub mod diff;
 pub mod discovery;
