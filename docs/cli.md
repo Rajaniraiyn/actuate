@@ -66,6 +66,7 @@ The default CLI build includes `--provider apple-device`. Library users enable t
 ```sh
 unimation --provider apple-device discover
 unimation --provider apple-device capabilities
+unimation --provider apple-device --device DEVICE_UDID discover
 unimation --provider apple-device --device DEVICE_UDID capture /absolute/new-frame.bin
 ```
 

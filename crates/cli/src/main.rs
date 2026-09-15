@@ -368,10 +368,10 @@ fn run(
                 return Ok(emit_value(&serde_json::to_value(ios::physical::capabilities())?, format)?);
             }
             Command::Discover { scope: DiscoveryScope::All } => {
-                if connection.device.is_some() {
-                    return Err("Device discovery does not select one device; omit --device".into());
-                }
                 let provider = ios::physical::PhysicalCapture::from_env(std::time::Duration::from_secs(10))?;
+                if let Some(udid) = connection.device.as_deref() {
+                    return Ok(emit_value(&serde_json::to_value(provider.info(udid)?)?, format)?);
+                }
                 let devices = provider.discover()?;
                 if devices.devices.is_empty() && format == unimation::OutputFormat::Text {
                     println!("No physical iOS devices returned by usbmuxd; inventory completeness is unknown.");

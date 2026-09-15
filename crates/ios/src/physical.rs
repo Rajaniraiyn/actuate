@@ -3,8 +3,8 @@
 //! never mounts developer images, installs software, or starts XCTest.
 use idevice::{
     IdeviceError, IdeviceService,
-    provider::UsbmuxdProvider,
-    services::screenshotr::ScreenshotService,
+    provider::{IdeviceProvider, UsbmuxdProvider},
+    services::{lockdown::LockdownClient, screenshotr::ScreenshotService},
     usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdDevice},
 };
 use serde::Serialize;
@@ -45,6 +45,7 @@ impl From<UsbmuxdDevice> for Device {
 #[derive(Debug, Serialize)]
 pub struct Capabilities {
     pub discovery: bool,
+    pub device_info: bool,
     pub capture_route: &'static str,
     pub capture_availability: &'static str,
     pub capture_requirement: &'static str,
@@ -55,6 +56,7 @@ pub struct Capabilities {
 pub fn capabilities() -> Capabilities {
     Capabilities {
         discovery: true,
+        device_info: true,
         capture_route: "screenshotr",
         capture_availability: "unprobed",
         capture_requirement: "Existing pairing and screenshotr service; upstream documents this lockdownd route for iOS below 17. No developer image is mounted automatically.",
@@ -63,6 +65,18 @@ pub fn capabilities() -> Capabilities {
         streaming: false,
     }
 }
+/// Read-only lockdownd evidence. Values do not establish pairing or UI support.
+#[derive(Debug, Serialize)]
+pub struct DeviceInfo {
+    pub device: Device,
+    pub name: Option<String>,
+    pub product_type: Option<String>,
+    pub product_version: Option<String>,
+    /// Preserve native values (including data, dates and integer widths) without
+    /// forcing them through JSON. The convenience fields above can be absent.
+    pub properties_plist_xml: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FrameMetadata {
     pub format: String,
@@ -150,24 +164,34 @@ impl PhysicalDevices {
             Ok(DiscoveryReport { devices: connection.get_devices().await.map_err(|e| service_error("device_discovery", e))?.into_iter().map(Device::from).collect(), complete: false, issues: vec!["Upstream usbmuxd parsing may omit malformed device records; discovery does not probe pairing or service availability".into()] })
         }).await
     }
-    pub async fn screenshot(&self, udid: &str) -> Result<EncodedFrame> {
-        if udid.trim().is_empty() {
-            return Err(fail(
-                "device_required",
-                "An explicit nonempty UDID is required",
-            ));
+    /// Query existing lockdownd values without pairing, starting a session,
+    /// mounting a developer image, or installing a runner.
+    pub async fn info(&self, udid: &str) -> Result<DeviceInfo> {
+        require_udid(udid)?;
+        deadline(self.timeout, "device_info", async {
+            let devices = self.discover().await?;
+            let device = select_device(&devices.devices, udid)?.clone();
+            let provider = self.provider(&device);
+            read_info(&provider, device).await
+        })
+        .await
+    }
+    fn provider(&self, device: &Device) -> UsbmuxdProvider {
+        UsbmuxdProvider {
+            addr: self.address.clone(),
+            tag: 0,
+            udid: device.udid.clone(),
+            device_id: device.transport_id,
+            label: "unimation".into(),
         }
+    }
+    pub async fn screenshot(&self, udid: &str) -> Result<EncodedFrame> {
+        require_udid(udid)?;
         deadline(self.timeout, "capture", async {
             // Resolve transport IDs again on each operation; reconnect can change them.
             let devices = self.discover().await?;
             let device = select_device(&devices.devices, udid)?;
-            let provider = UsbmuxdProvider {
-                addr: self.address.clone(),
-                tag: 0,
-                udid: device.udid.clone(),
-                device_id: device.transport_id,
-                label: "unimation".into(),
-            };
+            let provider = self.provider(device);
             let mut screenshot = ScreenshotService::connect(&provider)
                 .await
                 .map_err(|e| service_error("screenshot_service_unavailable", e))?;
@@ -179,6 +203,53 @@ impl PhysicalDevices {
         })
         .await
     }
+}
+fn require_udid(udid: &str) -> Result<()> {
+    if udid.trim().is_empty() {
+        Err(fail(
+            "device_required",
+            "An explicit nonempty UDID is required",
+        ))
+    } else {
+        Ok(())
+    }
+}
+async fn read_info(provider: &dyn IdeviceProvider, device: Device) -> Result<DeviceInfo> {
+    let mut client = LockdownClient::connect(provider)
+        .await
+        .map_err(|e| service_error("lockdown_unavailable", e))?;
+    let values = client
+        .get_value(None, None)
+        .await
+        .map_err(|e| service_error("device_info_unavailable", e))?;
+    let dictionary = values.as_dictionary().ok_or_else(|| {
+        fail(
+            "invalid_device_info",
+            "Lockdownd returned non-dictionary device values",
+        )
+    })?;
+    let string = |key: &str| {
+        dictionary
+            .get(key)
+            .and_then(|v| v.as_string())
+            .map(str::to_owned)
+    };
+    let name = string("DeviceName");
+    let product_type = string("ProductType");
+    let product_version = string("ProductVersion");
+    let mut encoded = Vec::new();
+    values
+        .to_writer_xml(&mut encoded)
+        .map_err(|e| fail("device_info_encoding", e.to_string()))?;
+    let properties_plist_xml =
+        String::from_utf8(encoded).map_err(|e| fail("device_info_encoding", e.to_string()))?;
+    Ok(DeviceInfo {
+        device,
+        name,
+        product_type,
+        product_version,
+        properties_plist_xml,
+    })
 }
 fn select_device<'a>(devices: &'a [Device], udid: &str) -> Result<&'a Device> {
     let mut matches = devices.iter().filter(|d| d.udid == udid);
@@ -224,7 +295,7 @@ fn service_error(fallback: &str, error: IdeviceError) -> NativeError {
         IdeviceError::DeviceNotFound | IdeviceError::NoEstablishedConnection => {
             "device_disconnected"
         }
-        IdeviceError::ServiceNotFound => "screenshot_service_unavailable",
+        IdeviceError::ServiceNotFound => fallback,
         IdeviceError::Timeout => "device_timeout",
         _ => fallback,
     };
@@ -263,6 +334,13 @@ impl PhysicalCapture {
             Ok(())
         }
     }
+    pub fn info(&self, udid: &str) -> Result<DeviceInfo> {
+        self.check_runtime()?;
+        self.runtime
+            .as_ref()
+            .expect("runtime owned until drop")
+            .block_on(self.devices.info(udid))
+    }
     pub fn discover(&self) -> Result<DiscoveryReport> {
         self.check_runtime()?;
         self.runtime
@@ -298,6 +376,97 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
+    }
+    #[derive(Debug)]
+    struct InfoProvider(std::net::SocketAddr);
+    impl IdeviceProvider for InfoProvider {
+        fn connect(
+            &self,
+            port: u16,
+        ) -> std::pin::Pin<
+            Box<dyn Future<Output = std::result::Result<idevice::Idevice, IdeviceError>> + Send>,
+        > {
+            assert_eq!(port, LockdownClient::LOCKDOWND_PORT);
+            let address = self.0;
+            Box::pin(async move {
+                let stream = tokio::net::TcpStream::connect(address).await?;
+                Ok(idevice::Idevice::new(Box::new(stream), "unimation-test"))
+            })
+        }
+        fn label(&self) -> &str {
+            "unimation-test"
+        }
+        fn get_pairing_file(
+            &self,
+        ) -> std::pin::Pin<
+            Box<
+                dyn Future<
+                        Output = std::result::Result<
+                            idevice::pairing_file::PairingFile,
+                            IdeviceError,
+                        >,
+                    > + Send,
+            >,
+        > {
+            panic!("read-only info must not request pairing")
+        }
+    }
+    #[test]
+    fn device_info_preserves_native_values_without_pairing() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut header = [0; 4];
+            stream.read_exact(&mut header).unwrap();
+            let length = u32::from_be_bytes(header) as usize;
+            assert!(length < 8192);
+            let mut request = vec![0; length];
+            stream.read_exact(&mut request).unwrap();
+            let text = String::from_utf8(request).unwrap();
+            assert!(text.contains("GetValue"));
+            assert!(!text.contains("StartSession"));
+            let response = br#"<?xml version="1.0"?><plist version="1.0"><dict><key>Value</key><dict><key>DeviceName</key><string>Test phone</string><key>ProductType</key><string>iPhone17,1</string><key>ProductVersion</key><string>18.0</string><key>ExtraData</key><data>AQID</data><key>ExtraDate</key><date>2026-01-01T00:00:00Z</date></dict></dict></plist>"#;
+            stream
+                .write_all(&(response.len() as u32).to_be_bytes())
+                .unwrap();
+            stream.write_all(response).unwrap();
+            let mut next = [0];
+            assert_eq!(stream.read(&mut next).unwrap(), 0);
+        });
+        let device = Device {
+            udid: "test".into(),
+            transport_id: 3,
+            connection: ConnectionKind::Usb,
+        };
+        let info = runtime()
+            .block_on(read_info(&InfoProvider(address), device))
+            .unwrap();
+        assert_eq!(info.name.as_deref(), Some("Test phone"));
+        assert_eq!(info.product_version.as_deref(), Some("18.0"));
+        assert!(info.properties_plist_xml.contains("<data>"));
+        assert!(info.properties_plist_xml.contains("AQID"));
+        assert!(
+            info.properties_plist_xml
+                .contains("<date>2026-01-01T00:00:00Z</date>")
+        );
+        server.join().unwrap();
+    }
+    #[test]
+    fn empty_identity_is_rejected_before_transport() {
+        let devices = PhysicalDevices::new(
+            UsbmuxdAddr::TcpSocket("127.0.0.1:1".parse().unwrap()),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(
+            runtime().block_on(devices.info(" ")).unwrap_err().code,
+            "device_required"
+        );
     }
     #[test]
     fn exact_identity_and_ambiguity() {
