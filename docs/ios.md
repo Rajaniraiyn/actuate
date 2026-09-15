@@ -7,7 +7,7 @@ See [provider composition](composition.md) for the typed embedding and transport
 
 ## Installed runtimes and isolated devices
 
-`unimation ios-list` returns CoreSimulator's native JSON for installed devices, device
+`unimation ios simulators list` returns CoreSimulator's native JSON for installed devices, device
 types and runtimes. `--device-set /absolute/path` selects an isolated set. The executable
 comes from the installed CoreSimulator framework, bypassing Xcode's first-launch wrapper.
 No backend operation downloads a runtime.
@@ -30,7 +30,7 @@ still initializes guest data temporarily; the test removes its devices and direc
 ## Typed sessions and JSONL
 
 ```sh
-unimation ios-session --udid DEVICE_UUID --device-set /absolute/device/set
+unimation --provider ios --device DEVICE_UUID --device-set /absolute/device/set session
 ```
 
 Rust callers use `ios::session::connect` and typed `Session::execute` directly.

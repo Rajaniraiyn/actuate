@@ -6,7 +6,7 @@ use std::{
     io::{BufRead, Write},
     path::Path,
 };
-use unimation::{ElementRef, NativeError, Result};
+use unimation::{ElementRef, NativeError, OutputFormat, Result, presentation};
 
 // Serialize borrowed typed results directly to the output stream. In particular,
 // do not clone snapshots into a second serde_json::Value tree before encoding.
@@ -54,18 +54,46 @@ pub fn dispatch<B: SessionBackend>(session: &mut Session<B>, mut value: Value) -
 }
 /// Platform-owned agent protocol; the umbrella CLI only selects this entry point.
 pub fn run(udid: &str, device_set: &Path) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    run_formatted(udid, device_set, OutputFormat::Json)
+}
+pub fn run_formatted(
+    udid: &str,
+    device_set: &Path,
+    format: OutputFormat,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut session = session::connect(udid, device_set)?;
-    serve(
+    serve_formatted(
         &mut session,
         std::io::stdin().lock(),
         std::io::stdout().lock(),
+        format,
     )?;
     Ok(())
+}
+/// Shared one-shot command output, without a JSONL response envelope.
+pub fn write_result(response: &Response, mut writer: impl Write) -> std::io::Result<()> {
+    match response {
+        Response::Text(text) => writeln!(writer, "{text}")?,
+        _ => {
+            serde_json::to_writer(&mut writer, &Encoded(response))
+                .map_err(std::io::Error::other)?;
+            writer.write_all(b"\n")?;
+        }
+    }
+    writer.flush()
 }
 pub fn serve<B: SessionBackend>(
     session: &mut Session<B>,
     reader: impl BufRead,
+    writer: impl Write,
+) -> std::io::Result<()> {
+    serve_formatted(session, reader, writer, OutputFormat::Json)
+}
+pub fn serve_formatted<B: SessionBackend>(
+    session: &mut Session<B>,
+    reader: impl BufRead,
     mut writer: impl Write,
+    format: OutputFormat,
 ) -> std::io::Result<()> {
     for line in reader.lines() {
         let line = line?;
@@ -73,7 +101,34 @@ pub fn serve<B: SessionBackend>(
         let id = value.as_ref().ok().and_then(|v| v.get("id")).cloned();
         let result = value
             .map_err(|e| fail("invalid_request", e.to_string()))
-            .and_then(|v| dispatch(session, v));
+            .and_then(|v| dispatch(session, v))
+            .and_then(|response| {
+                if format != OutputFormat::Json
+                    && let Response::Snapshot(snapshot) = &response
+                {
+                    let view = presentation::render_snapshot(snapshot, &Default::default())?;
+                    return Ok(if format == OutputFormat::Text {
+                        Response::Text(presentation::render_snapshot_text(&view))
+                    } else {
+                        Response::Compact(view)
+                    });
+                }
+                Ok(response)
+            });
+        if format == OutputFormat::Text {
+            writeln!(
+                writer,
+                "--- response id={} ---",
+                id.as_ref().unwrap_or(&Value::Null)
+            )?;
+            match &result {
+                Ok(response) => write_result(response, &mut writer)?,
+                Err(error) => writeln!(writer, "{}", json!({"error":error}))?,
+            }
+            writeln!(writer, "--- end ---")?;
+            writer.flush()?;
+            continue;
+        }
         let reply = match &result {
             Ok(v) => Reply {
                 id: id.as_ref(),

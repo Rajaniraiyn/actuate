@@ -861,3 +861,18 @@ remains a test-script responsibility. The overlay crate owns platform-neutral pr
 animation and controller APIs, with AppKit rendering and explicit unsupported modules
 for the other platforms. Native mouse input is independent from visual cursor rendering.
 See `docs/composition.md` and `docs/ios.md` for the current contracts and tested limits.
+
+## CLI provider configuration and typed choices
+
+The common command grammar selects a provider through `--provider` or
+`UNIMATION_PROVIDER`, with explicit arguments taking precedence. `native` resolves
+to the host implementation. Device selection uses `--device` / `UNIMATION_DEVICE`
+and `--device-set` / `UNIMATION_DEVICE_SET`. There is no implicit first-simulator
+selection. Platform-specific resource discovery is nested under `ios simulators`.
+
+The CLI uses usage-rs value enums for closed choices and exhaustive Rust matches
+for dispatch. Environment resolution, validation, help, completion scripts and the
+exported command specification come from usage-rs. Installed resources do not
+change the grammar. Native APIs and persistent sessions remain in their provider
+crates; CLI routing maps shared arguments to typed provider requests. See
+[CLI configuration](docs/cli.md) for supported commands and current limitations.

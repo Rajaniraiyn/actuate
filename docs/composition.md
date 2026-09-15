@@ -53,7 +53,7 @@ unversioned native struct layout is an IPC protocol. A future binary adapter can
 the typed execution path without replacing JSON output for agents. JSON replies stream borrowed typed results
 directly to the writer instead of copying a snapshot into another JSON value tree.
 
-`unimation ios-session` delegates to the library. The optional `unimation-ios` binary
+`unimation --provider ios session` delegates to the library. The optional `unimation-ios` binary
 also belongs to the iOS crate; build it with `cargo build -p ios --features cli`.
 Its parser uses the same workspace `usage` dependency as the umbrella CLI. It is not a
 guest agent and is not needed by Rust callers. The backend does not upload an executable

@@ -2,29 +2,60 @@ name unimation
 bin unimation
 version "0.1.0"
 subcommand_required #true
+flag "-p --provider" help="Automation provider: native host, macos, or ios." global=#true env=UNIMATION_PROVIDER default=native {
+    arg <PROVIDER> {
+        choices {
+            choice native
+            choice macos
+            choice ios
+        }
+    }
+}
+flag --device help="Explicit provider device UUID; no implicit first-device selection." global=#true env=UNIMATION_DEVICE {
+    arg <DEVICE>
+}
+flag --device-set help="Existing simulator device set, required for the iOS provider." global=#true env=UNIMATION_DEVICE_SET {
+    arg <DEVICE_SET>
+}
 flag "-h --help" help="Print help" action=help builtin=#true
 flag "-V --version" help="Print version" action=version builtin=#true
-cmd ios-list help="List installed simulator runtimes and devices without downloading components." {
-    flag --device-set {
-        arg <DEVICE_SET>
-    }
+complete device_set type=dir
+cmd completions help="Generate a shell completion script using the command specification." {
     flag "-h --help" help="Print help" action=help builtin=#true
+    arg <SHELL> {
+        choices {
+            choice bash
+            choice zsh
+            choice fish
+        }
+    }
 }
-cmd ios-session help="Connect a JSONL session to one existing, booted iPhone or iPad simulator." {
-    flag --udid required=#true {
-        arg <UDID>
-    }
-    flag --device-set required=#true {
-        arg <DEVICE_SET>
-    }
+cmd ios help="iOS-specific resource discovery; interaction uses the shared commands." subcommand_required=#true {
     flag "-h --help" help="Print help" action=help builtin=#true
+    cmd simulators help="Inspect installed simulators without booting or installing anything." subcommand_required=#true {
+        flag "-h --help" help="Print help" action=help builtin=#true
+        cmd list help="List native runtime, device-type and device records." {
+            flag "-h --help" help="Print help" action=help builtin=#true
+        }
+    }
 }
 cmd discover help="List running applications and accessibility permission state." {
     flag --format default=json {
-        arg <FORMAT>
+        arg <FORMAT> {
+            choices {
+                choice json
+                choice compact
+                choice text
+            }
+        }
     }
     flag --scope default=all {
-        arg <SCOPE>
+        arg <SCOPE> {
+            choices {
+                choice all
+                choice apps
+            }
+        }
     }
     flag "-h --help" help="Print help" action=help builtin=#true
 }
@@ -37,7 +68,13 @@ cmd observe help="Read the native accessibility tree for an application." {
         arg <MAX_DEPTH>
     }
     flag --format default=json {
-        arg <FORMAT>
+        arg <FORMAT> {
+            choices {
+                choice json
+                choice compact
+                choice text
+            }
+        }
     }
     flag --interactive
     flag --hide-hidden
@@ -45,14 +82,25 @@ cmd observe help="Read the native accessibility tree for an application." {
         arg <LIMIT>
     }
     flag --scope default=application {
-        arg <SCOPE>
+        arg <SCOPE> {
+            choices {
+                choice application
+                choice window
+            }
+        }
     }
     flag "-h --help" help="Print help" action=help builtin=#true
-    arg <PID>
+    arg "[PID]"
 }
 cmd view help="Render a saved native snapshot without changing its references." {
     flag --format default=text {
-        arg <FORMAT>
+        arg <FORMAT> {
+            choices {
+                choice json
+                choice compact
+                choice text
+            }
+        }
     }
     flag --root {
         arg <ROOT>
@@ -73,7 +121,12 @@ cmd capture help="Capture the main display or an explicitly selected display/win
         arg <WINDOW>
     }
     flag --backend default=native {
-        arg <BACKEND>
+        arg <BACKEND> {
+            choices {
+                choice native
+                choice executable
+            }
+        }
     }
     flag --max-pixel-edge {
         arg <MAX_PIXEL_EDGE>
@@ -93,7 +146,13 @@ cmd capabilities help="Report delivery routes and availability." {
 cmd diff help="Compare two snapshots saved from the same live session." {
     flag --modified-only
     flag --format default=json {
-        arg <FORMAT>
+        arg <FORMAT> {
+            choices {
+                choice json
+                choice compact
+                choice text
+            }
+        }
     }
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <BEFORE>
@@ -120,7 +179,13 @@ cmd protocol help="Show JSON session commands and delivery semantics." {
 }
 cmd session help="Read JSON requests from stdin, retaining references until EOF." {
     flag --format help="JSONL is the machine protocol; text is a framed interactive transcript." default=json {
-        arg <FORMAT>
+        arg <FORMAT> {
+            choices {
+                choice json
+                choice compact
+                choice text
+            }
+        }
     }
     flag "-h --help" help="Print help" action=help builtin=#true
 }

@@ -89,8 +89,8 @@ Crate directories and package names are `android`, `cli`, `unimation`, `ios`, `l
 remains `unimation` and the optional cursor binary remains `unimation-overlay`.
 
 ```sh
-cargo run -p cli -- ios-list
-cargo run -p cli -- ios-session --udid DEVICE_UUID --device-set /absolute/device/set
+cargo run -p cli -- ios simulators list
+cargo run -p cli -- --provider ios --device DEVICE_UUID --device-set /absolute/device/set session
 ```
 
 Use an already-installed runtime. The session connects to a booted device without

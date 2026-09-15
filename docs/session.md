@@ -144,6 +144,6 @@ They must not fall back to global Escape, which can interrupt the hosting termin
 
 ## iOS Simulator sessions
 
-`unimation ios-session --udid UUID --device-set /absolute/path` selects the iOS provider.
+`unimation --provider ios --device UUID --device-set /absolute/path session` selects the iOS provider.
 It uses a frontmost guest application rather than the macOS PID observation selector.
 See [the iOS protocol](ios.md#jsonl-session) for supported operations and current limits.

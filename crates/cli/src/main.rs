@@ -1,56 +1,113 @@
-use usage::{Cli, Subcommands};
+use usage::{Cli, Subcommands, ValueEnum};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum Provider {
+    Native,
+    Macos,
+    Ios,
+}
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Format {
+    Json,
+    Compact,
+    Text,
+}
+impl From<Format> for unimation::OutputFormat {
+    fn from(value: Format) -> Self {
+        match value {
+            Format::Json => Self::Json,
+            Format::Compact => Self::Compact,
+            Format::Text => Self::Text,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DiscoveryScope {
+    All,
+    Apps,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum SnapshotScope {
+    Application,
+    Window,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CaptureRoute {
+    Native,
+    Executable,
+}
 
 #[derive(Cli)]
-#[usage(bin = "unimation", version)]
+#[usage(bin = "unimation", version, completion)]
 struct App {
+    /// Automation provider: native host, macos, or ios.
+    #[usage(
+        short = 'p',
+        long,
+        global,
+        default = "native",
+        env = "UNIMATION_PROVIDER",
+        value_enum
+    )]
+    provider: Provider,
+    /// Explicit provider device UUID; no implicit first-device selection.
+    #[usage(long, global, env = "UNIMATION_DEVICE")]
+    device: Option<String>,
+    /// Existing simulator device set, required for the iOS provider.
+    #[usage(long, global, env = "UNIMATION_DEVICE_SET", value_hint = usage::ValueHint::DirPath)]
+    device_set: Option<std::path::PathBuf>,
     #[usage(subcommand)]
     command: Command,
 }
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+}
 #[derive(Subcommands)]
 enum Command {
-    /// List installed simulator runtimes and devices without downloading components.
-    IosList {
-        #[usage(long)]
-        device_set: Option<std::path::PathBuf>,
+    /// Generate a shell completion script using the command specification.
+    Completions {
+        #[usage(value_enum)]
+        shell: Shell,
     },
-    /// Connect a JSONL session to one existing, booted iPhone or iPad simulator.
-    IosSession {
-        #[usage(long)]
-        udid: String,
-        #[usage(long)]
-        device_set: std::path::PathBuf,
+    /// iOS-specific resource discovery; interaction uses the shared commands.
+    Ios {
+        #[usage(subcommand)]
+        command: IosCommand,
     },
     /// List running applications and accessibility permission state.
     Discover {
-        #[usage(long, default = "json")]
-        format: String,
-        #[usage(long, default = "all")]
-        scope: String,
+        #[usage(long, default = "json", value_enum)]
+        format: Format,
+        #[usage(long, default = "all", value_enum)]
+        scope: DiscoveryScope,
     },
     /// Read the native accessibility tree for an application.
     #[usage(visible_alias = "snapshot")]
     Observe {
-        pid: i32,
+        pid: Option<i32>,
         #[usage(long, default = "1000")]
         max_nodes: usize,
         #[usage(long, default = "30")]
         max_depth: usize,
-        #[usage(long, default = "json")]
-        format: String,
+        #[usage(long, default = "json", value_enum)]
+        format: Format,
         #[usage(long)]
         interactive: bool,
         #[usage(long)]
         hide_hidden: bool,
         #[usage(long, default = "200")]
         limit: usize,
-        #[usage(long, default = "application")]
-        scope: String,
+        #[usage(long, default = "application", value_enum)]
+        scope: SnapshotScope,
     },
     /// Render a saved native snapshot without changing its references.
     View {
         snapshot: std::path::PathBuf,
-        #[usage(long, default = "text")]
-        format: String,
+        #[usage(long, default = "text", value_enum)]
+        format: Format,
         #[usage(long)]
         root: Option<String>,
         #[usage(long)]
@@ -67,8 +124,8 @@ enum Command {
         display: Option<u32>,
         #[usage(long)]
         window: Option<u32>,
-        #[usage(long, default = "native")]
-        backend: String,
+        #[usage(long, default = "native", value_enum)]
+        backend: CaptureRoute,
         #[usage(long)]
         max_pixel_edge: Option<u32>,
     },
@@ -84,8 +141,8 @@ enum Command {
         after: std::path::PathBuf,
         #[usage(long)]
         modified_only: bool,
-        #[usage(long, default = "json")]
-        format: String,
+        #[usage(long, default = "json", value_enum)]
+        format: Format,
     },
     /// Query a saved snapshot without discarding fields from matching nodes.
     Query {
@@ -104,12 +161,39 @@ enum Command {
     /// Read JSON requests from stdin, retaining references until EOF.
     Session {
         /// JSONL is the machine protocol; text is a framed interactive transcript.
-        #[usage(long, default = "json")]
-        format: String,
+        #[usage(long, default = "json", value_enum)]
+        format: Format,
     },
+}
+#[derive(Subcommands)]
+enum IosCommand {
+    /// Inspect installed simulators without booting or installing anything.
+    Simulators {
+        #[usage(subcommand)]
+        command: SimulatorCommand,
+    },
+}
+#[derive(Subcommands)]
+enum SimulatorCommand {
+    /// List native runtime, device-type and device records.
+    List,
+}
+struct Connection {
+    provider: Provider,
+    device: Option<String>,
+    device_set: Option<std::path::PathBuf>,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::parse();
+    if let Command::Completions { shell } = app.command {
+        let shell = match shell {
+            Shell::Bash => usage::complete::Shell::Bash,
+            Shell::Zsh => usage::complete::Shell::Zsh,
+            Shell::Fish => usage::complete::Shell::Fish,
+        };
+        print!("{}", App::completion_script(shell));
+        return Ok(());
+    }
     if matches!(app.command, Command::Protocol) {
         println!("{}", include_str!("../../../docs/session.md"));
         return Ok(());
@@ -118,6 +202,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print!("{}", App::to_kdl());
         return Ok(());
     }
+    let connection = Connection {
+        provider: app.provider,
+        device: app.device,
+        device_set: app.device_set,
+    };
     match app.command {
         Command::Diff {
             before,
@@ -129,7 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::from_reader(std::fs::File::open(before)?)?;
             let after: unimation::Snapshot = serde_json::from_reader(std::fs::File::open(after)?)?;
             let diff = unimation::diff::diff_snapshots(&before, &after)?;
-            let format = parse_format(&format)?;
+            let format = unimation::OutputFormat::from(format);
             if format == unimation::OutputFormat::Compact {
                 if modified_only {
                     return Err("--modified-only selects native fields; use --format json or text for that mode".into());
@@ -188,7 +277,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .transpose()?;
             emit_snapshot(
                 &snapshot,
-                parse_format(&format)?,
+                unimation::OutputFormat::from(format),
                 &unimation::presentation::PresentationOptions {
                     root,
                     actionable_only: interactive,
@@ -218,34 +307,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             Ok(())
         }
-        command => run(command),
+        command => run(command, connection),
     }
 }
 #[cfg(not(target_os = "macos"))]
-fn run(_: Command) -> Result<(), Box<dyn std::error::Error>> {
+fn run(_: Command, _: Connection) -> Result<(), Box<dyn std::error::Error>> {
     Err("No provider implemented for this OS yet".into())
 }
 #[cfg(target_os = "macos")]
-fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
+fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
     use unimation::{Discover, ObserveRequest};
+    if let Command::Ios {
+        command: IosCommand::Simulators {
+            command: SimulatorCommand::List,
+        },
+    } = command
+    {
+        if connection.device.is_some() {
+            return Err("Simulator listing does not select a device; omit --device".into());
+        }
+        let mut sim = ios::simulator::Simctl::installed()?;
+        if let Some(path) = connection.device_set {
+            sim = sim.with_set(path);
+        }
+        println!("{}", serde_json::to_string_pretty(&sim.list()?)?);
+        return Ok(());
+    }
+    if connection.provider == Provider::Ios {
+        let udid = connection
+            .device
+            .as_deref()
+            .ok_or("--provider ios requires --device UUID")?;
+        let set = connection
+            .device_set
+            .as_deref()
+            .ok_or("--provider ios requires --device-set PATH")?;
+        let request = match command {
+            Command::Session { format } => {
+                return ios::jsonl::run_formatted(udid, set, unimation::OutputFormat::from(format));
+            }
+            Command::Observe { pid, max_nodes, max_depth, format, interactive, hide_hidden, limit, scope } => {
+                if scope != SnapshotScope::Application { return Err("The iOS provider does not support --scope window; use its explicit observation scopes in a session".into()); }
+                ios::session::Request::Snapshot {
+                    scope: pid.map(|pid| ios::SimulatorScope::Application {pid}).unwrap_or(ios::SimulatorScope::Frontmost),
+                    max_nodes, max_depth, format:unimation::OutputFormat::from(format),
+                    options:unimation::presentation::PresentationOptions {actionable_only:interactive,hide_known_hidden:hide_hidden,max_nodes:limit,..Default::default()},
+                }
+            }
+            Command::Capture {path,display,window,backend,max_pixel_edge} => {
+                if display.is_some() || window.is_some() || backend != CaptureRoute::Native || max_pixel_edge.is_some() {
+                    return Err("The iOS capture provider supports its primary display at native resolution; window/display selection, resizing and alternate capture routes are unavailable".into());
+                }
+                ios::session::Request::Capture {path}
+            }
+            Command::Capabilities => ios::session::Request::Capabilities {},
+            _ => return Err("This command is not supported by the selected iOS provider; use capabilities for its supported operations".into()),
+        };
+        let mut session = ios::session::connect(udid, set)?;
+        return Ok(ios::jsonl::write_result(
+            &session.execute(request)?,
+            std::io::stdout().lock(),
+        )?);
+    }
+    if connection.device.is_some() || connection.device_set.is_some() {
+        return Err(
+            "--device and --device-set require --provider ios or ios simulators list".into(),
+        );
+    }
     let mut ax = macos::Accessibility::new();
     let result = match command {
-        Command::IosList { device_set } => {
-            let mut sim = ios::simulator::Simctl::installed()?;
-            if let Some(path) = device_set {
-                sim = sim.with_set(path);
-            }
-            sim.list()?
-        }
-        Command::IosSession { udid, device_set } => {
-            return ios::jsonl::run(&udid, &device_set);
-        }
+        Command::Ios { .. } => unreachable!(),
         Command::Discover { format, scope } => {
-            let format = parse_format(&format)?;
-            let scope = match scope.as_str() {
-                "all" => unimation::discovery::DiscoveryScope::All,
-                "apps" => unimation::discovery::DiscoveryScope::Apps,
-                _ => return Err("--scope must be apps or all".into()),
+            let format = unimation::OutputFormat::from(format);
+            let scope = match scope {
+                DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
+                DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
             };
             let value = unimation::discovery::present_discovery(&ax.discover()?, scope, format);
             if let Some(text) = value.as_str() {
@@ -267,11 +403,17 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             limit,
             scope,
         } => {
-            let format = parse_format(&format)?;
-            let scope = match scope.as_str() {
-                "application" => macos::session::SnapshotScope::Application,
-                "window" => macos::session::SnapshotScope::FocusedWindow,
-                _ => return Err("--scope must be application or window".into()),
+            let format = unimation::OutputFormat::from(format);
+            let pid = match pid {
+                Some(pid) => pid,
+                None => ax.discover()?["active_pid"]
+                    .as_i64()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .ok_or("No foreground application is available; specify a PID")?,
+            };
+            let scope = match scope {
+                SnapshotScope::Application => macos::session::SnapshotScope::Application,
+                SnapshotScope::Window => macos::session::SnapshotScope::FocusedWindow,
             };
             let value = macos::session::MacSession::new().extension(
                 macos::session::MacRequest::Snapshot {
@@ -318,10 +460,9 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             macos::session::MacSession::new().extension(macos::session::MacRequest::Capture {
                 source,
                 path,
-                backend: match backend.as_str() {
-                    "native" => macos::session::CaptureBackend::Native,
-                    "executable" => macos::session::CaptureBackend::Executable,
-                    _ => return Err("--backend must be native or executable".into()),
+                backend: match backend {
+                    CaptureRoute::Native => macos::session::CaptureBackend::Native,
+                    CaptureRoute::Executable => macos::session::CaptureBackend::Executable,
                 },
                 max_pixel_edge,
             })?
@@ -335,9 +476,10 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Capabilities => macos::session::MacSession::new()
             .extension(macos::session::MacRequest::Capabilities {})?,
         Command::Session { format } => {
-            return session(parse_format(&format)?);
+            return session(unimation::OutputFormat::from(format));
         }
-        Command::Spec
+        Command::Completions { .. }
+        | Command::Spec
         | Command::Protocol
         | Command::Diff { .. }
         | Command::Query { .. }
@@ -408,14 +550,6 @@ fn session(format: unimation::OutputFormat) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-fn parse_format(value: &str) -> Result<unimation::OutputFormat, Box<dyn std::error::Error>> {
-    match value {
-        "json" => Ok(unimation::OutputFormat::Json),
-        "compact" => Ok(unimation::OutputFormat::Compact),
-        "text" => Ok(unimation::OutputFormat::Text),
-        _ => Err("--format must be text, compact, or json".into()),
-    }
-}
 fn parse_short_ref(
     session: &str,
     value: &str,
