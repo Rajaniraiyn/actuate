@@ -45,7 +45,7 @@ The runtime now includes snapshot diff/query, capture mappings, native ScreenCap
 
 Core tests added during this iteration cover incomplete diff coverage, reparenting with stable references, foreign/duplicate references, parameter changes, read errors and nested opaque values, null versus missing attributes, alternative native names, and invalid geometry. The final workspace run passed 18 core tests, 10 macOS tests and two overlay tests. Two permission-dependent capture unit tests stay ignored in the default suite; live capture paths were checked separately.
 
-[SkyLight host results](skylight.md#host-validation) document the fixture and native event-probe checks, including a background first-mouse limitation. The [overlay README](../crates/unimation-overlay/README.md#validation) records its independent visual test. Neither establishes support for every application, display layout or system panel.
+[SkyLight host results](skylight.md#host-validation) document the fixture and native event-probe checks, including a background first-mouse limitation. The [overlay README](../crates/overlay/README.md#validation) records its independent visual test. Neither establishes support for every application, display layout or system panel.
 
 The expanded live fixture suite passed checkbox semantic toggles and explicit glyph clicking, slider clicking, popup menu selection, modal sheet discovery/dismissal and rejection of a global reference click beneath the sheet, dynamic insertion/removal diffs, unchanged sibling references, window-local clicking, and 300-pixel resized native window capture followed by an effective image click. Reusing that frame after input returned `stale_frame` with no effect.
 
@@ -100,3 +100,31 @@ The final workspace suite passed 54 tests with two permission-dependent capture 
 ignored. Workspace build, formatting, Clippy with warnings denied, the macOS build
 without native capture, CLI presentation regressions, and live discovery projections
 passed. These automated checks are separate from the native panel observations above.
+
+
+## iPhone and iPad Simulator, 2026-09-16
+
+The installed iOS 26.4 runtime reported version 26.4.1, build 23E254a. Tests created an
+iPhone 17 Pro and iPad Pro 13-inch M5 in a separate temporary device set. Both booted
+without downloading runtimes or installing guest applications.
+
+Native semantic presses navigated Settings to General and About on each device. Repeated
+observations retained the General element reference. Raw diff and compact text rendering
+worked; foreign session references were rejected without effects. Native PNG screenshots
+visually confirmed the iPhone About page and iPad split-view About page. No settings
+values were changed. Two consecutive final iPad About snapshots contained 18 nodes each
+and had zero new, removed, unobserved or modified nodes. Its text projection was 1,516 bytes.
+
+The final workspace suite passed 61 tests, with two existing capture tests ignored.
+Workspace build, strict Clippy, CLI presentation regressions and the macOS build without
+native capture passed. Live protocol checks covered invalid limits, unknown fields,
+request-ID echoing and recovery. These results cover native AX semantic input, not HID.
+
+The initial `xcrun simctl` listing invoked Xcode's automatic first-launch setup wrapper.
+That wrapper was stopped. All subsequent operations used the existing CoreSimulator
+executable directly. No simulator runtime download was requested.
+
+Both test devices were shut down and deleted, then their temporary device set and
+screenshots were removed. The default device-set UUID list matched its pre-test list.
+The reproducible test is `tests/ios_simulator_e2e.py`; API and limitations are in
+[the iOS guide](ios.md).

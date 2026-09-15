@@ -819,3 +819,23 @@ advertised increment/decrement actions. Providers must expose both routes and pr
 unsupported results without silently changing delivery. Panel transitions also need
 bounded observation of expected controls rather than assuming a dispatch receipt means
 the next accessibility snapshot is settled. See `docs/validation.md` for measured results.
+
+
+### iOS Simulator implementation and workspace names
+
+The workspace packages and directories are now `android`, `cli`, `unimation`, `ios`,
+`linux`, `macos`, `overlay`, and `windows`, with publishing disabled. The portable traits
+live in `unimation`; the executable remains `unimation` from package `cli`.
+
+One macOS-hosted `ios` backend covers iPhone and iPad simulators through CoreSimulator
+and AccessibilityPlatformTranslation. Device identity consists of an explicit device-set
+path and UUID. Native bridge tokens distinguish connections; retained object equality
+provides session references. Simulator lifecycle is a separate `Simctl` provider, and
+semantic actions implement the portable trait without depending on host pointer input.
+
+The initial implementation exposes frontmost-app observation, retained raw snapshots,
+compact views, native queries/diffs, advertised semantic actions, app launch and screenshots.
+HID input, full property enumeration, scene/display roots, validated pixel mapping and
+physical devices remain distinct capabilities to implement. See `docs/ios.md` for API
+contracts, ownership, deadlines and limitations. Disposable test device sets reuse an
+installed runtime and are shut down and removed after validation.

@@ -35,3 +35,27 @@ Keep AT-SPI observation separate from X11, portal/libei, compositor-specific and
 ## Android and iOS
 
 Android initially uses ADB with explicit device identity and transport lifecycle. Preserve accessibility and display coordinates separately. For iOS, define deployment profiles for simulator, test runner, device services and private integrations; do not claim ordinary app permissions grant universal device control. Share the common traits, not macOS implementation assumptions.
+
+
+## iOS and iPadOS Simulator implementation
+
+The `ios` crate connects an explicitly selected, booted device in an explicit device set.
+It shares one implementation across iPhone and iPad. `SimulatorAccessibility` loads
+CoreSimulator and AccessibilityPlatformTranslation through direct Rust/objc2 calls.
+A token-routed translator delegate sends accessibility requests to the selected guest.
+There is no guest app, Swift helper, XCTest installation, or host-global input fallback.
+
+`observe_frontmost` reads the guest application's translated hierarchy and retains native
+element identities. `SemanticActions` invokes advertised actions. Complete native property
+enumeration, HID touch/text, physical-device transport and screenshot-to-touch mapping
+remain separate work. `complete=false` explicitly marks the selected attribute coverage.
+A callback response deadline is not a deadline for the whole synchronous observation.
+
+`Simctl` separately handles installed-runtime discovery, explicit device lifecycle,
+launch and PNG capture. It invokes the installed CoreSimulator executable directly;
+Xcode's wrapper may run first-launch installation even for a listing command. Operations
+have bounded subprocess deadlines and preserve unknown effects after possible mutation.
+The library does not delete arbitrary device-set directories on drop. The creator owns
+shutdown, device deletion and removal of its temporary directory.
+
+See [iOS session usage and validation](ios.md).

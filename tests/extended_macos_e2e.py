@@ -113,10 +113,10 @@ def main():
             assert session.result(op='discover')['active_pid']==before_active
             time.sleep(.3)
             display=session.result(op='displays')[0]['display_id']
-            Path('/tmp/unimation-overlay-validation.png').unlink(missing_ok=True)
-            Path('/tmp/unimation-overlay-executable.png').unlink(missing_ok=True)
-            session.result(op='capture',source={'kind':'display','display_id':display},path='/tmp/unimation-overlay-validation.png')
-            subprocess.run(['/usr/sbin/screencapture','-x','/tmp/unimation-overlay-executable.png'],check=True)
+            Path('/tmp/overlay-validation.png').unlink(missing_ok=True)
+            Path('/tmp/overlay-executable.png').unlink(missing_ok=True)
+            session.result(op='capture',source={'kind':'display','display_id':display},path='/tmp/overlay-validation.png')
+            subprocess.run(['/usr/sbin/screencapture','-x','/tmp/overlay-executable.png'],check=True)
             print('OVERLAY_STATE',session.result(op='cursor_state'),flush=True)
             print('PASS overlay launch with targeted input, virtual pointer state, shared cursor/focus unchanged')
         finally:

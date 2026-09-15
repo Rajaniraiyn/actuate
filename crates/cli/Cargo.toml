@@ -1,0 +1,16 @@
+[package]
+publish = false
+name = "cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[[bin]]
+name = "unimation"
+path = "src/main.rs"
+[dependencies]
+unimation.workspace = true
+macos.workspace = true
+serde_json.workspace = true
+usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics"] }
+serde.workspace = true
+ios.workspace = true

@@ -6,11 +6,11 @@ Agent-first UI automation library. The initial Cargo workspace contains portable
 
 ```sh
 cargo build --workspace
-cargo run -p unimation-cli -- --help
-cargo run -p unimation-cli -- discover
-cargo run -p unimation-cli -- observe 1234 --max-nodes 1000 --max-depth 30
-cargo run -p unimation-cli -- spec
-cargo run -p unimation-cli -- protocol
+cargo run -p cli -- --help
+cargo run -p cli -- discover
+cargo run -p cli -- observe 1234 --max-nodes 1000 --max-depth 30
+cargo run -p cli -- spec
+cargo run -p cli -- protocol
 ```
 
 macOS requires an installed Apple SDK and linker. If the default Xcode selection is unusable but Command Line Tools are installed, prefix build commands with `DEVELOPER_DIR=/Library/Developer/CommandLineTools`.
@@ -24,7 +24,7 @@ the default `--scope all --format json` retains all native discovery records.
 
 ## Embedding
 
-`unimation-core` has independent `Observe`, `SemanticActions`, `PointerInput`, `TextInput`, and `Discover` traits. `Capture`, `KeyboardInput`, `WindowControl`, and `Subscribe` define extension points. `unimation-macos` exposes `Accessibility`, `QuartzInput`, `SkyLightInput`, native screenshot capture, and `MacSession` through modern `objc2` framework bindings. It has no Swift runtime or helper dependency. Other platform crates are reserved for implementation.
+`unimation` has independent `Observe`, `SemanticActions`, `PointerInput`, `TextInput`, and `Discover` traits. `Capture`, `KeyboardInput`, `WindowControl`, and `Subscribe` define extension points. `macos` exposes `Accessibility`, `QuartzInput`, `SkyLightInput`, native screenshot capture, and `MacSession` through modern `objc2` framework bindings. It has no Swift runtime or helper dependency. The `ios` crate implements a macOS-hosted iPhone/iPad Simulator accessibility bridge. Android, Linux and Windows remain reserved for implementation.
 
 ## Agent sessions
 
@@ -51,7 +51,7 @@ The live `actionability` session request reports native states, geometry, attach
 
 Native ScreenCaptureKit screenshots are the default on macOS 14+. Request `backend: "executable"` to use the separate `screencapture` provider; there is no implicit fallback. Native capture supports `max_pixel_edge` downscaling. Image clicks reject changed geometry and frames predating a session input dispatch. These checks cannot detect every external UI change.
 
-The optional [Rust cursor overlay](crates/unimation-overlay/README.md) runs as a separate visual process. It draws a synthetic cursor and never injects input. Start it through `cursor_overlay` with an explicit executable path to visualize subsequent SkyLight pointer dispatches. It starts hidden. `cursor_state` reports dispatch state and visual errors; neither is proof of application consumption or completed rendering.
+The optional [Rust cursor overlay](crates/overlay/README.md) runs as a separate visual process. It draws a synthetic cursor and never injects input. Start it through `cursor_overlay` with an explicit executable path to visualize subsequent SkyLight pointer dispatches. It starts hidden. `cursor_state` reports dispatch state and visual errors; neither is proof of application consumption or completed rendering.
 
 Reference pointer clicks use the AX bounds center as a heuristic. Bounds can include blank space, such as the area beside a checkbox label. Observe actual acceptance, or use an explicit verified coordinate or advertised semantic action.
 
@@ -80,3 +80,19 @@ python3 tests/presentation_e2e.py
 ```
 
 The native test changes Calculator's expression, briefly opens a disposable fixture, and moves the pointer. It exercises semantic setters, Unicode input, and pointer delivery. It reports known process-directed pointer limitations separately from successful global-route tests. `tests/skylight_e2e.py` exercises the separate private window-targeted provider. See [observed results](docs/validation.md) and the [session protocol](docs/session.md).
+
+
+## iPhone and iPad simulators
+
+Crate directories and package names are `android`, `cli`, `unimation`, `ios`, `linux`,
+`macos`, `overlay` and `windows`. Every package has `publish = false`; the CLI binary
+remains `unimation` and the optional cursor binary remains `unimation-overlay`.
+
+```sh
+cargo run -p cli -- ios-list
+cargo run -p cli -- ios-session --udid DEVICE_UUID --device-set /absolute/device/set
+```
+
+Use an already-installed runtime. The session connects to a booted device without
+installing a guest app. [The iOS guide](docs/ios.md) describes native semantic actions,
+compact snapshots, diffs, temporary device cleanup and current limitations.

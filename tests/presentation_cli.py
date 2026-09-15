@@ -27,7 +27,7 @@ def main():
     after = copy.deepcopy(before)
     after['revision'] = 2
     after['nodes'][1]['attributes']['AXTitle']['value'] = 'Found 🦀'
-    with tempfile.TemporaryDirectory(prefix='unimation-cli-') as directory:
+    with tempfile.TemporaryDirectory(prefix='cli-') as directory:
         a, b = Path(directory)/'before.json', Path(directory)/'after.json'
         a.write_text(json.dumps(before))
         b.write_text(json.dumps(after))

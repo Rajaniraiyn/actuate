@@ -4,6 +4,21 @@ version "0.1.0"
 subcommand_required #true
 flag "-h --help" help="Print help" action=help builtin=#true
 flag "-V --version" help="Print version" action=version builtin=#true
+cmd ios-list help="List installed simulator runtimes and devices without downloading components." {
+    flag --device-set {
+        arg <DEVICE_SET>
+    }
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd ios-session help="Connect a JSONL session to one existing, booted iPhone or iPad simulator." {
+    flag --udid required=#true {
+        arg <UDID>
+    }
+    flag --device-set required=#true {
+        arg <DEVICE_SET>
+    }
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
 cmd discover help="List running applications and accessibility permission state." {
     flag --format default=json {
         arg <FORMAT>

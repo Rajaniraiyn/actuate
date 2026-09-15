@@ -1,7 +1,0 @@
-[package]
-name = "unimation-linux"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-[dependencies]
-unimation-core.workspace = true

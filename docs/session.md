@@ -2,7 +2,7 @@
 
 Run `unimation session`. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
 
-The authoritative request types are `unimation_core::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `unimation_macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
+The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
 
 | Operation | Fields | Result |
 | --- | --- | --- |
@@ -106,14 +106,14 @@ Display images support global input. Window images support global, process and S
 ## Optional cursor visualization
 
 ```json
-{"op":"cursor_overlay","action":{"kind":"start","executable":"/absolute/path/to/unimation-overlay"}}
+{"op":"cursor_overlay","action":{"kind":"start","executable":"/absolute/path/to/overlay"}}
 {"op":"cursor_state"}
 {"op":"cursor_overlay","action":{"kind":"stop"}}
 ```
 
 The explicit helper path is resolved without a shell or PATH search. Startup leaves the overlay hidden. Subsequent successful SkyLight pointer dispatches queue a visualization at the last dispatched point and show the cursor. Moves animate for 180 ms; clicks move immediately and pulse. Visualization follows input dispatch, rather than delaying input until the animation arrives. It does not mirror the physical pointer or observe application acceptance.
 
-`cursor_state` reports the last dispatched SkyLight pointer and visual-helper errors. Queue success does not acknowledge rendering. A visual failure never converts successful input into a retryable operation error. Inspect visual status separately and do not repeat input merely because the cursor was not visible. Stop or session teardown ends the helper. The helper also exposes its own [visual-only protocol](../crates/unimation-overlay/README.md).
+`cursor_state` reports the last dispatched SkyLight pointer and visual-helper errors. Queue success does not acknowledge rendering. A visual failure never converts successful input into a retryable operation error. Inspect visual status separately and do not repeat input merely because the cursor was not visible. Stop or session teardown ends the helper. The helper also exposes its own [visual-only protocol](../crates/overlay/README.md).
 
 Reference pointer clicks use an AX bounds center as a convenience heuristic. Bounds can span noninteractive space, including blank regions beside checkbox controls. A delivered center click may do nothing. Verify acceptance with a fresh observation, or select an explicit coordinate or an advertised semantic action appropriate to the task.
 
@@ -141,3 +141,9 @@ A focused AX window does not prove its process owns global keyboard input. On th
 Control Center had a focused nonactivating panel while Ghostty remained frontmost.
 Panel tests dismiss with process-directed Escape and verify that the panel disappeared.
 They must not fall back to global Escape, which can interrupt the hosting terminal.
+
+## iOS Simulator sessions
+
+`unimation ios-session --udid UUID --device-set /absolute/path` selects the iOS provider.
+It uses a frontmost guest application rather than the macOS PID observation selector.
+See [the iOS protocol](ios.md#jsonl-session) for supported operations and current limits.
