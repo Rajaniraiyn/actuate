@@ -43,3 +43,7 @@ These are proposed design rules derived from the comparison:
 - Define coordinates in desktop logical points. Convert against the primary display's desktop origin, then the destination screen's AppKit frame. Use per-screen backing scale and refresh after display changes.
 - Treat capture inclusion as a requested policy. Exclude known owned overlay window IDs from foreground-target verification. A visible cursor must not be mistaken for an application window.
 - Keep native drag event types, held-button cleanup and route validation independent of the visual path planner. A visually smooth animation does not verify application input consumption.
+
+## Follow-up review
+
+See [the newer automation audit](automation-reference-audit.md) for current Cua sources and [the overlay README](../crates/overlay/README.md) for implemented appearance/motion changes and visual validation.

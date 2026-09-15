@@ -650,7 +650,7 @@ Normal responses stay compact. Put native errors, routing decisions, and detaile
 
 ### Presentation adapters and viewport evidence
 
-Keep retained native observations immutable. A presentation adapter interprets backend attributes into display roles, names, values, states and geometry. The generic renderer handles hierarchy, short references, text previews, filtering and output limits. A backend-specific name or role mapping must not become an assumption in the portable renderer. Native attributes and unknown values remain available through raw snapshots and inspection. Selecting text or compact JSON is an explicit output choice; existing JSON command and session defaults remain compatible.
+Keep retained native observations immutable. A presentation adapter interprets backend attributes into display roles, names, values, states and geometry. The generic renderer handles hierarchy, short references, text previews, filtering and output limits. A backend-specific name or role mapping must not become an assumption in the portable renderer. Native attributes and unknown values remain available through raw snapshots and inspection. CLI text is the default; full JSON and JSONL session replies require `--json`. Typed native observations remain unchanged.
 
 Use a window, sheet, document or web area as the observation scope when the task concerns that region. Application roots can include entire menu hierarchies and unrelated windows. Applying a display filter after a broad traversal reduces output but does not reduce native reads or restore nodes missed by a traversal budget. Expose both collection limits and presentation limits, with separate incomplete-coverage and omitted-output counts.
 
@@ -884,3 +884,73 @@ session responses. Typed library responses stay unchanged. A portable writer
 handles fallback record formatting with escaped controls, while trees and diffs
 retain specialized bounded views. Platform-only command variants are cfg-gated,
 so usage-rs omits them from parsing, help and completions on other hosts.
+
+## Apple ecosystem reuse and discovery boundaries
+
+The [Apple crate audit](docs/apple-crate-audit.md) and
+[automation source audit](docs/automation-reference-audit.md) record pinned source,
+licenses, observed implementation limits and acceptance criteria. They are reference
+material for implementation; upstream README claims do not establish our capabilities.
+
+### Physical devices and simulators
+
+Use `idevice` as the first candidate for a feature-gated physical iPhone/iPad
+transport adapter. Keep discovery, pairing/connection, capture, app services,
+observation and input independently replaceable. A discovered device can be present
+while locked, unpaired, disconnected or missing a requested service. Discovery
+must report that evidence without starting a runner or modifying device state.
+No physical-device adapter is implemented by this audit.
+
+A future `ios::physical` adapter can run on hosts where its selected transport is
+supported. Move the current crate-wide macOS gate to `ios::simulator` when that
+adapter is added. The simulator subcommand stays macOS-only; do not hide all future
+iOS device integrations on Windows/Linux. Stable device identity survives reconnect,
+but element references remain tied to a live session generation. Selection requires
+an explicit device when multiple devices exist; never silently pick the first.
+
+Async transport ownership stays inside the adapter. Feature selection controls
+Tokio, TLS, usbmuxd, tunneling and optional XCTest/WDA dependencies. Raw service
+availability is separate from validated whole-OS observation or input. Orientation,
+frame dimensions and input geometry must be verified together before publishing a
+screenshot-to-click transform.
+
+### Native framework and capture reuse
+
+Retain current objc2 bindings as the common native object family. Do not migrate
+to deprecated Servo Cocoa wrappers. Evaluate doom-fish ScreenCaptureKit wrappers
+for a streaming/audio provider when those capabilities are needed; their Swift
+bridge changes build requirements. An adapter may own apple-cf types internally,
+but conversions and retain/release rules must not spread through the portable API.
+Current still capture remains on direct objc2. No performance advantage has been
+measured for an alternative.
+
+Future streams preserve frame status, timestamp, geometry revision and buffer
+lifetime. Queue bounds and dropped-frame reporting are explicit. Late callbacks
+must not access freed state; timeouts do not prove cancellation of native work.
+
+### Automation patterns to adopt independently
+
+AXTerminator provides useful examples for locator recovery and wait conditions.
+Its audited noncommercial license rules out treating its code as a permissive
+replacement here. Preserve Unimation's explicit input routes instead of copying
+its semantic-to-global-click fallback. Its observer stub is not evidence of working
+notification delivery.
+
+Add wait conditions as typed predicates over existing observations, with completion
+evidence, elapsed time and coverage. Tree quietness does not mean an application
+finished its work. Notification providers need bounded queues, overflow reporting
+and resnapshot after event loss. Locator recovery returns candidates and ambiguity;
+it never rebinds an old exact reference to a similar-looking element.
+
+### Visual cursor implementation status
+
+The shared overlay now owns validated appearance and deterministic curved/straight/
+reduced-motion sampling. AppKit owns the arrow, local shadow, click ring and window.
+Curvature is bounded; final coordinates remain exact. Visual animation never changes
+input trajectories or action outcomes. Replacing visual motion does not acknowledge
+application completion. Idle ticks avoid repositioning an unchanged panel.
+
+The redesigned renderer was visually inspected on macOS. A show/move/click/hide
+cycle left foreground PID and shared pointer coordinates unchanged. Mixed-DPI
+screen crossings and other platform renderers remain unvalidated. Multi-session
+cursors, arrival acknowledgements and idle timer suspension remain future work.

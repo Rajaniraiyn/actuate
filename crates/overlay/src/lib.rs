@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use unimation::{Effect, NativeError, Result};
 
 mod controller;
+pub mod motion;
 pub use controller::OverlayController;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -16,9 +17,39 @@ pub enum CursorCommand {
         x: f64,
         y: f64,
     },
+    Configure {
+        appearance: CursorAppearance,
+    },
     Hide,
     Show,
     Quit,
+}
+/// Portable visual preferences, independent of AppKit or input delivery.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CursorAppearance {
+    pub scale: f64,
+    pub color: [f64; 3],
+    pub motion: motion::MotionStyle,
+}
+impl Default for CursorAppearance {
+    fn default() -> Self {
+        Self {
+            scale: 1.,
+            color: [0.46, 0.28, 0.95],
+            motion: Default::default(),
+        }
+    }
+}
+impl CursorAppearance {
+    pub fn is_valid(&self) -> bool {
+        self.scale.is_finite()
+            && (0.5..=3.).contains(&self.scale)
+            && self
+                .color
+                .iter()
+                .all(|c| c.is_finite() && (0. ..=1.).contains(c))
+    }
 }
 fn duration() -> u64 {
     250
@@ -41,12 +72,13 @@ impl CursorCommand {
                 !x.is_finite() || !y.is_finite() || *duration_ms > 10000
             }
             Self::Click { x, y } => !x.is_finite() || !y.is_finite(),
+            Self::Configure { appearance } => !appearance.is_valid(),
             _ => false,
         };
         if invalid {
             Err(NativeError {
                 code: "invalid_cursor_command".into(),
-                message: "Coordinates must be finite and duration_ms must not exceed 10000".into(),
+                message: "Coordinates must be finite, duration_ms <= 10000, scale 0.5..=3, and RGB components 0..=1".into(),
                 effect: Effect::None,
             })
         } else {
@@ -123,6 +155,42 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CursorCommand::Hide).unwrap(),
             serde_json::json!({"op":"hide"})
+        );
+    }
+    #[test]
+    fn appearance_is_bounded_and_reduced_motion_is_typed() {
+        let command: CursorCommand = serde_json::from_str(
+            r#"{"op":"configure","appearance":{"motion":"reduced","scale":1.5}}"#,
+        )
+        .unwrap();
+        assert!(command.validate().is_ok());
+        for scale in [0., 3.1, f64::NAN] {
+            assert!(
+                CursorCommand::Configure {
+                    appearance: CursorAppearance {
+                        scale,
+                        ..Default::default()
+                    }
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        assert!(
+            CursorCommand::Configure {
+                appearance: CursorAppearance {
+                    color: [1.1, 0., 0.],
+                    ..Default::default()
+                }
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<CursorCommand>(
+                r#"{"op":"configure","appearance":{"motion":"magic"}}"#
+            )
+            .is_err()
         );
     }
     #[test]
