@@ -6,7 +6,7 @@ The authoritative request types are `unimation_core::SessionRequest`, `SemanticA
 
 | Operation | Fields | Result |
 | --- | --- | --- |
-| `discover` | None | Session, permission state, applications |
+| `discover` | Optional `scope: all/apps`, `format: json/text/compact` | Session, permission state, applications; defaults to all/native JSON |
 | `observe` | `request: {pid, max_nodes?, max_depth?}` | Snapshot; budgets default to 1000 and 30 |
 | `snapshot` | `request`, optional `scope`, `options`, `format` | Observe, retain raw state and render in one request |
 | `observe_subtree` | `target`, optional `max_nodes` and `max_depth` | Snapshot rooted at a live reference |
@@ -118,3 +118,26 @@ The explicit helper path is resolved without a shell or PATH search. Startup lea
 Reference pointer clicks use an AX bounds center as a convenience heuristic. Bounds can span noninteractive space, including blank regions beside checkbox controls. A delivered center click may do nothing. Verify acceptance with a fresh observation, or select an explicit coordinate or an advertised semantic action appropriate to the task.
 
 Reference pointer routes check the owning window's advertised `AXSheets` and direct `AXChildren` for attached sheets. An underlying reference returns `blocked_by_modal` before dispatch. Global image clicks also check the element hit at the mapped point. This is not a complete modal-window graph: separate app-modal windows, unadvertised overlays and raw coordinate/PID delivery still require caller observation and routing.
+
+## System controls and attributed names
+
+`{"op":"discover","scope":"apps","format":"text"}` returns a JSON string containing
+an escaped, line-oriented application list. The default discovery request keeps every
+record. Filtering is a presentation choice and does not invalidate references.
+
+macOS attributed strings encode as `{"type":"attributed_string","text":...,"native":...}`.
+`text` contains the decoded native string; `native` retains the original styled object.
+Name queries and compact views use attributed titles, descriptions and labels when plain
+names are unavailable. They never parse native debug descriptions into names.
+Expected absent AX values are omitted from compact value previews. Other unavailable or
+opaque values have a short inspect marker; raw attributes and coverage counts remain available.
+
+Custom AX actions must use the exact string returned in `actions`, including embedded
+newlines. Control Center's Wi-Fi details action is one such action. `AXShowMenu` can
+open an editing menu instead of network details, even when the returned effect is unknown.
+Reobserve before deciding whether to retry an action.
+
+A focused AX window does not prove its process owns global keyboard input. On this host,
+Control Center had a focused nonactivating panel while Ghostty remained frontmost.
+Panel tests dismiss with process-directed Escape and verify that the panel disappeared.
+They must not fall back to global Escape, which can interrupt the hosting terminal.

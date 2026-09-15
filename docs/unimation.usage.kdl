@@ -5,6 +5,12 @@ subcommand_required #true
 flag "-h --help" help="Print help" action=help builtin=#true
 flag "-V --version" help="Print version" action=version builtin=#true
 cmd discover help="List running applications and accessibility permission state." {
+    flag --format default=json {
+        arg <FORMAT>
+    }
+    flag --scope default=all {
+        arg <SCOPE>
+    }
     flag "-h --help" help="Print help" action=help builtin=#true
 }
 cmd observe help="Read the native accessibility tree for an application." {

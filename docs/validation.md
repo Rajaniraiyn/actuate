@@ -64,3 +64,39 @@ A real NSScrollView fixture starts with Row 12 below its viewport. A reference-c
 VS Code's focused window produced 540 nodes in one sample. The saved native JSON occupied 3,208,271 bytes; the interactive text projection of that same observation occupied 5,609 bytes and showed 64 candidates, with 476 filtered nodes explicitly counted. These are byte counts for different representations, not a claim of lossless compression or measured model-token counts. Native traversal completed, while native attribute errors remained reported.
 
 On that VS Code window, SkyLight selected Search and then restored Explorer with the original retained references. AXSelected confirmed both state changes. The initial global center hit test reported occlusion, which did not prevent the window-targeted route from working. The projected diff reported selection changes and newly displayed controls. No document content was edited or search submitted. The editor exposed an accessibility message asking for screen-reader mode, so this test does not establish full editor-text accessibility.
+
+## Native menu bar controls, 2026-09-16
+
+- Control Center: opened the actual menu-bar panel and its Display, Sound and Wi-Fi
+  details. Attributed AX descriptions supplied labels missing from plain attributes.
+  Panel contents changed during opening; observations must wait for the expected control.
+- Display and Sound: `set_float` on `AXValue` returned unsupported with no effect.
+  Advertised `AXDecrement` and `AXIncrement` actions changed each slider from 1.0 to
+  approximately 0.9 and restored it to 0.9999998807907104, within 1e-4 of its original
+  value and displayed as 100%. Dark Mode, Night Shift and audio output were unchanged.
+- Wi-Fi: invoked the exact advertised custom details action. Read the enabled/connected
+  state without toggling Wi-Fi or switching networks. `AXShowMenu` instead opened the
+  editing context menu despite returning an unknown effect.
+- Spotlight: one deliberate global Command+Space opened the actual search panel after
+  checking the foreground PID. Process-directed text entered `2+3`; native result text
+  contained `5`. Process-directed Escape cleared and dismissed the panel.
+- Ghostty: native menu actions opened About Ghostty. A native window capture showed the
+  About dialog. Its own `AXCloseButton` closed it; a subsequent observation showed only
+  the original terminal window.
+- Discovery: the apps projection selected 12 of 65 records in one sample and reported
+  the 53 omitted records. Default JSON preserved all records. Counts depend on running apps.
+
+An initial cleanup script incorrectly sent global Escape repeatedly. The user observed
+this interrupt the terminal interaction. Control Center's AX window was focused while
+Ghostty remained the foreground process. Subsequent tests used process-directed Escape
+and verified dismissal. `AXCancel` and menu-item press receipts alone did not prove that
+an open subpanel closed. The final observation found no Control Center or Spotlight windows.
+
+These checks establish the native semantic and process-key routes described above.
+They do not establish SkyLight pointer support for every system panel. No documents
+were edited and no network configuration was changed.
+
+The final workspace suite passed 54 tests with two permission-dependent capture tests
+ignored. Workspace build, formatting, Clippy with warnings denied, the macOS build
+without native capture, CLI presentation regressions, and live discovery projections
+passed. These automated checks are separate from the native panel observations above.

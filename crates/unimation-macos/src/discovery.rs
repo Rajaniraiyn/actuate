@@ -74,3 +74,42 @@ pub(crate) fn frontmost_pid() -> Option<i32> {
         }
     }
 }
+
+/// Native on-screen membership, independent of activation policy or app naming.
+pub(crate) fn visible_windows() -> Result<std::collections::BTreeMap<i32, Vec<u32>>> {
+    use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};
+    use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
+    let array =
+        CGWindowListCopyWindowInfo(CGWindowListOption::OptionOnScreenOnly, 0).ok_or_else(|| {
+            error(
+                "window_query",
+                "On-screen window metadata unavailable",
+                Effect::None,
+            )
+        })?;
+    let mut result = std::collections::BTreeMap::<i32, Vec<u32>>::new();
+    for index in 0..array.count() {
+        // SAFETY: Window Server returns a live array of CF dictionaries.
+        let value = unsafe { &*array.value_at_index(index).cast::<CFType>() };
+        let Some(dictionary) = value.downcast_ref::<CFDictionary>() else {
+            continue;
+        };
+        let number = |name: &str| -> Option<i64> {
+            let key = CFString::from_str(name);
+            // SAFETY: key and dictionary stay alive for the lookup and typed borrow.
+            let pointer = unsafe { dictionary.value((&*key as *const CFString).cast()) };
+            if pointer.is_null() {
+                return None;
+            }
+            unsafe { &*pointer.cast::<CFType>() }
+                .downcast_ref::<CFNumber>()?
+                .as_i64()
+        };
+        if let (Some(pid), Some(id)) = (number("kCGWindowOwnerPID"), number("kCGWindowNumber"))
+            && let (Ok(pid), Ok(id)) = (i32::try_from(pid), u32::try_from(id))
+        {
+            result.entry(pid).or_default().push(id);
+        }
+    }
+    Ok(result)
+}

@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod diff;
+pub mod discovery;
 pub mod geometry;
 pub mod presentation;
 pub mod query;
@@ -241,7 +242,12 @@ pub enum SessionRequest {
         #[serde(default = "default_view_changes")]
         max_changes: usize,
     },
-    Discover {},
+    Discover {
+        #[serde(default)]
+        scope: discovery::DiscoveryScope,
+        #[serde(default = "default_raw_format")]
+        format: OutputFormat,
+    },
     Observe {
         request: ObserveRequest,
     },
@@ -314,6 +320,10 @@ pub enum SessionRequest {
     Inspect {
         target: ElementRef,
     },
+}
+
+pub const fn default_raw_format() -> OutputFormat {
+    OutputFormat::Json
 }
 
 pub const fn default_view_changes() -> usize {

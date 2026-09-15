@@ -131,23 +131,10 @@ impl PresentationAdapter for AxPresentationAdapter {
         compact(node, depth, max_text_chars)
     }
     fn value_is_comparable(&self, node: &Node) -> bool {
-        node.attributes.get("AXValue").is_some_and(|v| {
-            v.is_boolean()
-                || v.is_number()
-                || v.is_string()
-                || matches!(
-                    v.get("type").and_then(Value::as_str),
-                    Some("string" | "bool" | "integer" | "float")
-                )
-        })
+        node.attributes.get("AXValue").and_then(ax_scalar).is_some()
     }
     fn has_uncertain_values(&self, node: &Node) -> bool {
-        node.attributes.get("AXValue").is_some_and(|v| {
-            matches!(
-                v.get("type").and_then(Value::as_str),
-                Some("opaque" | "read_error" | "ax_error" | "utf16")
-            )
-        })
+        node.attributes.contains_key("AXValue") && !self.value_is_comparable(node)
     }
     fn bounds(&self, node: &Node) -> Option<ViewportBounds> {
         let p = node.attributes.get("AXPosition")?;
@@ -248,10 +235,10 @@ fn preview(text: &str, limit: usize) -> Preview {
     }
 }
 fn string(value: &Value) -> Option<&str> {
-    if value.get("type").and_then(Value::as_str) == Some("string") {
-        value.get("value")?.as_str()
-    } else {
-        value.as_str()
+    match value.get("type").and_then(Value::as_str) {
+        Some("string") => value.get("value")?.as_str(),
+        Some("attributed_string") => string(value.get("text")?),
+        _ => value.as_str(),
     }
 }
 fn boolean(node: &Node, attribute: &str) -> Option<bool> {
@@ -295,17 +282,43 @@ fn errors(value: &Value) -> usize {
         _ => 0,
     }
 }
+// Only scalar data has a comparable compact AX value. Native containers,
+// opaque handles, malformed values, and errors remain available through inspect.
+fn ax_scalar(value: &Value) -> Option<String> {
+    let scalar = if value.is_object() {
+        match value.get("type").and_then(Value::as_str)? {
+            "string" | "integer" | "float" | "bool" => value.get("value")?,
+            _ => return None,
+        }
+    } else {
+        value
+    };
+    if let Some(text) = scalar.as_str() {
+        Some(text.into())
+    } else if scalar.is_number() || scalar.is_boolean() {
+        Some(scalar.to_string())
+    } else {
+        None
+    }
+}
 fn compact(node: &Node, depth: usize, limit: usize) -> CompactNode {
     let role = node.attributes.get("AXRole").and_then(string);
-    let name = ["AXTitle", "AXDescription", "AXLabel"]
-        .into_iter()
-        .find_map(|key| {
-            node.attributes
-                .get(key)
-                .and_then(string)
-                .filter(|s| !s.is_empty())
-                .map(|s| (key, s))
-        });
+    let name = [
+        "AXTitle",
+        "AXDescription",
+        "AXLabel",
+        "AXAttributedTitle",
+        "AXAttributedDescription",
+        "AXAttributedLabel",
+    ]
+    .into_iter()
+    .find_map(|key| {
+        node.attributes
+            .get(key)
+            .and_then(string)
+            .filter(|s| !s.is_empty())
+            .map(|s| (key, s))
+    });
     let visibility_evidence: Vec<_> = ["AXHidden", "AXVisible", "AXMinimized"]
         .into_iter()
         .filter_map(|key| {
@@ -337,27 +350,20 @@ fn compact(node: &Node, depth: usize, limit: usize) -> CompactNode {
         role: role.map(|s| preview(s, limit)),
         name: name.map(|(_, s)| preview(s, limit)),
         name_attribute: name.map(|(key, _)| key.into()),
-        value: node.attributes.get("AXValue").map(|v| {
-            preview(
-                &string(v).map(str::to_owned).unwrap_or_else(|| {
-                    if matches!(
-                        v.get("type").and_then(Value::as_str),
-                        Some("integer" | "float" | "bool")
-                    ) {
-                        v.get("value")
-                            .map(|scalar| {
-                                scalar
-                                    .as_str()
-                                    .map(str::to_owned)
-                                    .unwrap_or_else(|| scalar.to_string())
-                            })
-                            .unwrap_or_else(|| v.to_string())
-                    } else {
-                        v.to_string()
-                    }
-                }),
+        value: node.attributes.get("AXValue").and_then(|v| {
+            // Optional AX values are commonly absent on controls. Retain their
+            // unavailable count without presenting a native error as a value.
+            if matches!(
+                v.get("type").and_then(Value::as_str),
+                Some("read_error" | "ax_error")
+            ) && unavailable(v) > 0
+            {
+                return None;
+            }
+            Some(preview(
+                &ax_scalar(v).unwrap_or_else(|| "<unknown; inspect>".into()),
                 limit,
-            )
+            ))
         }),
         enabled: boolean(node, "AXEnabled"),
         focused: boolean(node, "AXFocused"),
@@ -1144,6 +1150,66 @@ mod tests {
         assert_eq!(view.rows[0].value.as_ref().unwrap().text, "1");
         assert_eq!(view.rows[0].error_count, 1);
         assert_eq!(view.rows[0].unavailable_count, 1);
+    }
+    #[test]
+    fn attributed_names_follow_plain_names_and_skip_read_errors() {
+        let mut root = node(9, &[]);
+        root.attributes.insert(
+            "AXTitle".into(),
+            json!({"type":"read_error","error":{"code":"ax_-25212"}}),
+        );
+        root.attributes.insert("AXAttributedDescription".into(), json!({"type":"attributed_string","text":{"type":"string","value":"Display"},"native":{"type":"opaque","description":"do not parse"}}));
+        let view = render_snapshot(
+            &snapshot(vec![root.clone()]),
+            &PresentationOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(view.rows[0].name.as_ref().unwrap().text, "Display");
+        assert_eq!(
+            view.rows[0].name_attribute.as_deref(),
+            Some("AXAttributedDescription")
+        );
+        root.attributes
+            .insert("AXLabel".into(), json!("Plain label"));
+        let view = render_snapshot(&snapshot(vec![root]), &PresentationOptions::default()).unwrap();
+        assert_eq!(view.rows[0].name.as_ref().unwrap().text, "Plain label");
+    }
+    #[test]
+    fn absent_ax_values_are_omitted_and_unknown_values_are_bounded() {
+        for code in ["ax_-25212", "ax_-25205"] {
+            let mut root = node(9, &[]);
+            root.attributes.insert(
+                "AXValue".into(),
+                json!({"type":"read_error","error":{"code":code,"message":"native diagnostic"}}),
+            );
+            let view =
+                render_snapshot(&snapshot(vec![root]), &PresentationOptions::default()).unwrap();
+            assert!(view.rows[0].value.is_none());
+            assert_eq!(view.rows[0].unavailable_count, 1);
+            assert_eq!(view.rows[0].error_count, 0);
+            assert!(!render_snapshot_text(&view).contains("native diagnostic"));
+        }
+        for value in [
+            json!({"type":"read_error","error":{"code":"ax_-25200","message":"native diagnostic"}}),
+            json!({"type":"opaque","id":1,"description":"native diagnostic".repeat(100)}),
+            json!({"type":"array","value":[1,2,3]}),
+        ] {
+            let mut root = node(9, &[]);
+            root.attributes.insert("AXValue".into(), value);
+            let before = snapshot(vec![root]);
+            let view = render_snapshot(&before, &PresentationOptions::default()).unwrap();
+            assert_eq!(
+                view.rows[0].value.as_ref().unwrap().text,
+                "<unknown; inspect>"
+            );
+            assert!(!render_snapshot_text(&view).contains("native diagnostic"));
+            let mut after = before.clone();
+            after.revision += 1;
+            let diff =
+                render_view_diff(&before, &after, &PresentationOptions::default(), 10).unwrap();
+            assert!(diff.contains("uncertain_rows=1"), "{diff}");
+            assert!(!diff.contains("modified"), "{diff}");
+        }
     }
     #[test]
     fn view_diff_uses_single_quoted_scalar_and_identifies_entered_rows() {

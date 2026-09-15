@@ -798,3 +798,24 @@ These commit links identify the research versions. Coverage is limited to the fi
 [src-pywinauto-menu]: https://github.com/pywinauto/pywinauto/blob/18d2a95cebed2f0061ab4e4c80c3a76ece5dd4f3/pywinauto/controls/menuwrapper.py
 [src-cua-menu]: https://github.com/trycua/cua/blob/5fcd67326dd0406bca823e5488cf39f47491c869/libs/cua-driver/rust/crates/platform-macos/src/tools/invoke_menu.rs
 [src-browser-identity]: https://github.com/browser-use/browser-use/blob/843819cb8131e1370948d381ede9be7f8366ddc4/tests/ci/browser/test_dom_serializer_session_identity.py
+
+
+### Host-tested system panel details
+
+The macOS implementation retains attributed AX strings as both decoded text and an
+opaque native object. Compact names and queries can read Control Center labels without
+losing styling data in the native representation. Discovery has optional app filtering
+and text/compact projections; complete native records remain the default.
+
+Input routing must distinguish AX focus from the foreground process. A nonactivating
+Control Center panel can expose `AXFocused=true` while the terminal owns global input.
+Use an explicit process route for supported panel keys and verify the resulting state.
+Never infer that AX focus makes global cleanup keys safe. Native action names are opaque
+identifiers, including custom strings containing newlines. An unknown effect requires
+observation before retry because the action may already have opened a different menu.
+
+Control Center sliders on the validation host rejected AXValue setters but accepted
+advertised increment/decrement actions. Providers must expose both routes and preserve
+unsupported results without silently changing delivery. Panel transitions also need
+bounded observation of expected controls rather than assuming a dispatch receipt means
+the next accessibility snapshot is settled. See `docs/validation.md` for measured results.

@@ -15,6 +15,11 @@ cargo run -p unimation-cli -- protocol
 
 macOS requires an installed Apple SDK and linker. If the default Xcode selection is unusable but Command Line Tools are installed, prefix build commands with `DEVELOPER_DIR=/Library/Developer/CommandLineTools`.
 
+For a shorter application list, use `unimation discover --scope apps --format text`.
+This includes regular apps, processes with visible windows, and known macOS system controls.
+It reports how many records were omitted. `--format compact` provides a JSON projection;
+the default `--scope all --format json` retains all native discovery records.
+
 `discover` reports actual accessibility trust without prompting. Permission inheritance depends on the host and launch context; the backend checks it at runtime.
 
 ## Embedding

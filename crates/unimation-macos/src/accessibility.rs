@@ -1,8 +1,8 @@
 use crate::error;
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFArray, CFBoolean, CFNumber, CFRange, CFRetained, CFString, CFType, CGPoint, CGRect, CGSize,
-    Type,
+    CFArray, CFAttributedString, CFBoolean, CFNumber, CFRange, CFRetained, CFString, CFType,
+    CGPoint, CGRect, CGSize, Type,
 };
 use objc2_foundation::NSUUID;
 use serde_json::{Value, json};
@@ -194,6 +194,15 @@ impl Accessibility {
         if let Some(v) = value.downcast_ref::<AXUIElement>() {
             return json!({"type":"element", "value": self.intern(v)});
         }
+        if let Some(v) = value.downcast_ref::<CFAttributedString>()
+            && let Some(text) = v.string()
+        {
+            let text = self.encode(&text, depth + 1);
+            // Keep the exact styled object available to embeddings; plain text
+            // is extracted by the native API, never parsed from diagnostics.
+            let native = self.opaque(value, "attributed_string_native");
+            return json!({"type":"attributed_string", "text":text, "native":native});
+        }
         if let Some(v) = value.downcast_ref::<CFString>() {
             let mut units = vec![0; v.length() as usize];
             // SAFETY: buffer covers exactly the requested UTF-16 range.
@@ -360,6 +369,7 @@ impl Discover for Accessibility {
     fn discover(&mut self) -> Result<Value> {
         let apps = crate::discovery::applications()?;
         let active_pid = crate::discovery::frontmost_pid();
+        let visible_windows = crate::discovery::visible_windows();
         // Query native AXFrontmost per app. AppKit caches isActive until its run
         // loop runs, which is not guaranteed in a synchronous embedding host.
         let mut applications = vec![];
@@ -376,7 +386,21 @@ impl Discover for Accessibility {
                         false,
                     )?;
                 }
-                let value = attribute(&element, "AXFrontmost")?;
+                let mut raw = ptr::null();
+                let value = unsafe {
+                    check(
+                        element.copy_attribute_value(
+                            &CFString::from_str("AXFrontmost"),
+                            NonNull::from(&mut raw),
+                        ),
+                        "AXFrontmost",
+                        false,
+                    )?;
+                    CFRetained::from_raw(
+                        NonNull::new(raw.cast_mut())
+                            .ok_or_else(|| error("native_null", "AXFrontmost", Effect::None))?,
+                    )
+                };
                 value
                     .downcast_ref::<CFBoolean>()
                     .map(CFBoolean::as_bool)
@@ -385,14 +409,32 @@ impl Discover for Accessibility {
             if matches!(frontmost, Ok(true)) {
                 active_pids.push(pid);
             }
+            let policy = match app.activationPolicy().0 {
+                0 => "regular",
+                1 => "accessory",
+                2 => "prohibited",
+                _ => "unknown",
+            };
+            let bundle = app.bundleIdentifier().map(|s| s.to_string());
+            // These OS controls can exist without an open window. This explicit native
+            // adapter list is presentation metadata, never an access restriction.
+            let system_ui = matches!(
+                bundle.as_deref(),
+                Some(
+                    "com.apple.Spotlight"
+                        | "com.apple.controlcenter"
+                        | "com.apple.dock"
+                        | "com.apple.systemuiserver"
+                )
+            );
             applications.push(json!({"pid":pid,"name":app.localizedName().map(|s|s.to_string()),
-                "bundle_id":app.bundleIdentifier().map(|s|s.to_string()),"active":active_pid.map(|front|front==pid), "ax_frontmost":frontmost.as_ref().ok(),
+                "bundle_id":bundle,"activation_policy":policy,"hidden":app.isHidden(),"terminated":app.isTerminated(),"system_ui":system_ui,"visible_window_ids":visible_windows.as_ref().ok().map(|windows|windows.get(&pid).cloned().unwrap_or_default()),"active":active_pid.map(|front|front==pid), "ax_frontmost":frontmost.as_ref().ok(),
                 "active_error":frontmost.err()}));
         }
         Ok(
             json!({"session":self.session,"accessibility_trusted":Self::is_trusted(),
             "active_pid":active_pid,"ax_frontmost_pids":active_pids,
-            "active_state_source":"optional_process_manager_probe","application_list_source":"libproc_per_pid_appkit","applications":applications}),
+            "window_error":visible_windows.err(),"active_state_source":"optional_process_manager_probe","application_list_source":"libproc_per_pid_appkit","applications":applications}),
         )
     }
 }
@@ -678,6 +720,24 @@ impl SemanticActions for Accessibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn attributed_text_keeps_text_and_exact_native_object() {
+        let mut provider = Accessibility::new();
+        let text = CFString::from_str("Sound 🦀");
+        // SAFETY: default allocator and an empty attribute dictionary are allowed.
+        let attributed = unsafe { CFAttributedString::new(None, Some(&text), None) }.unwrap();
+        let encoded = provider.encode(&attributed, 0);
+        assert_eq!(encoded["type"], "attributed_string");
+        assert_eq!(encoded["text"]["value"], "Sound 🦀");
+        let handle = &encoded["native"];
+        let native = provider
+            .native_value(
+                handle["session"].as_str().unwrap(),
+                handle["id"].as_u64().unwrap(),
+            )
+            .unwrap();
+        assert!(native.downcast_ref::<CFAttributedString>().is_some());
+    }
     #[test]
     fn retains_unknown_native_values_and_rejects_foreign_sessions() {
         let mut provider = Accessibility::new();

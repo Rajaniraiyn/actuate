@@ -9,7 +9,12 @@ struct App {
 #[derive(Subcommands)]
 enum Command {
     /// List running applications and accessibility permission state.
-    Discover,
+    Discover {
+        #[usage(long, default = "json")]
+        format: String,
+        #[usage(long, default = "all")]
+        scope: String,
+    },
     /// Read the native accessibility tree for an application.
     #[usage(visible_alias = "snapshot")]
     Observe {
@@ -219,7 +224,24 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     use unimation_core::{Discover, ObserveRequest};
     let mut ax = unimation_macos::Accessibility::new();
     let result = match command {
-        Command::Discover => ax.discover()?,
+        Command::Discover { format, scope } => {
+            let format = parse_format(&format)?;
+            let scope = match scope.as_str() {
+                "all" => unimation_core::discovery::DiscoveryScope::All,
+                "apps" => unimation_core::discovery::DiscoveryScope::Apps,
+                _ => return Err("--scope must be apps or all".into()),
+            };
+            let value =
+                unimation_core::discovery::present_discovery(&ax.discover()?, scope, format);
+            if let Some(text) = value.as_str() {
+                print!("{text}");
+            } else if format == unimation_core::OutputFormat::Compact {
+                println!("{}", serde_json::to_string(&value)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            }
+            return Ok(());
+        }
         Command::Observe {
             pid,
             max_nodes,

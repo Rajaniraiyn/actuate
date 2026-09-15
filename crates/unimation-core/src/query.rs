@@ -23,7 +23,7 @@ impl TextMatch {
 pub struct NodeQuery {
     /// Native role, such as AXButton. No role aliases are inferred.
     pub role: Option<TextMatch>,
-    /// Matches any AXTitle, AXDescription or AXLabel string, without choosing a canonical name.
+    /// Matches plain or attributed AX title, description and label text without choosing a canonical name.
     pub name: Option<TextMatch>,
     /// Exact raw JSON equality, including native type tags. All predicates must match.
     #[serde(default)]
@@ -50,6 +50,11 @@ enum Match {
 }
 fn string(value: Option<&Value>) -> Option<&str> {
     let value = value?;
+    let value = if value.get("type").and_then(Value::as_str) == Some("attributed_string") {
+        value.get("text")?
+    } else {
+        value
+    };
     if value.get("type").and_then(Value::as_str) == Some("string") {
         value.get("value")?.as_str()
     } else {
@@ -75,6 +80,7 @@ fn text(node: &Node, names: &[&str], predicate: &TextMatch) -> Match {
             Some(value) if string(Some(value)).is_some_and(|s| predicate.matches(s)) => {
                 return Match::Yes;
             }
+            Some(value) if string(Some(value)).is_some() => (),
             Some(value) if is_unreadable(value) => unknown = true,
             None if !node.issues.is_empty() => unknown = true,
             _ => (),
@@ -100,7 +106,18 @@ pub fn query_nodes(snapshot: &Snapshot, query: &NodeQuery) -> QueryResult {
             predicates.push(text(node, &["AXRole"], role));
         }
         if let Some(name) = &query.name {
-            predicates.push(text(node, &["AXTitle", "AXDescription", "AXLabel"], name));
+            predicates.push(text(
+                node,
+                &[
+                    "AXTitle",
+                    "AXDescription",
+                    "AXLabel",
+                    "AXAttributedTitle",
+                    "AXAttributedDescription",
+                    "AXAttributedLabel",
+                ],
+                name,
+            ));
         }
         if let Some(action) = &query.action {
             predicates.push(if node.actions.contains(action) {
@@ -166,6 +183,22 @@ mod tests {
                 issues: vec![],
             }],
         }
+    }
+    #[test]
+    fn attributed_names_are_searchable_without_parsing_native_diagnostics() {
+        let mut source = snapshot();
+        source.nodes[0].attributes.insert(
+            "AXDescription".into(),
+            serde_json::json!({"type":"read_error"}),
+        );
+        source.nodes[0].attributes.insert("AXAttributedDescription".into(), serde_json::json!({"type":"attributed_string","text":{"type":"string","value":"Display"},"native":{"type":"opaque","description":"not the label"}}));
+        let query = NodeQuery {
+            name: Some(TextMatch::Exact {
+                value: "Display".into(),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(query_nodes(&source, &query).matches.len(), 1);
     }
     #[test]
     fn combines_filters_without_projection_or_false_coverage() {

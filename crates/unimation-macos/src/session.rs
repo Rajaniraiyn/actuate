@@ -356,7 +356,7 @@ impl MacSession {
                     std::thread::sleep(std::time::Duration::from_millis(25));
                 }
             }
-            SessionRequest::Discover{}=>self.ax.discover(),
+            SessionRequest::Discover{scope,format}=>self.ax.discover().map(|raw|discovery::present_discovery(&raw,scope,format)),
             SessionRequest::Observe{request}=>{let s=self.ax.observe(request)?;Ok(self.remember(s))},
             SessionRequest::ObserveSubtree{target,max_nodes,max_depth}=>{let s=self.ax.observe_subtree(&target,max_nodes,max_depth)?;Ok(self.remember(s))},
             SessionRequest::Inspect{target}=>self.ax.inspect(&target),
