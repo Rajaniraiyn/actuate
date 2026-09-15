@@ -1,0 +1,28 @@
+name unimation
+bin unimation
+version "0.1.0"
+subcommand_required #true
+flag "-h --help" help="Print help" action=help builtin=#true
+flag "-V --version" help="Print version" action=version builtin=#true
+cmd discover help="List running applications and accessibility permission state." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd observe help="Read the native accessibility tree for an application." {
+    flag --max-nodes default="1000" {
+        arg <MAX_NODES>
+    }
+    flag --max-depth default="30" {
+        arg <MAX_DEPTH>
+    }
+    flag "-h --help" help="Print help" action=help builtin=#true
+    arg <PID>
+}
+cmd spec help="Export the portable Usage command specification." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd protocol help="Show JSON session commands and delivery semantics." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd session help="Read JSON requests from stdin, retaining references until EOF." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}

@@ -1,0 +1,17 @@
+[package]
+name = "unimation-macos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+unimation-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "AXUIElement", "AXValue", "AXError", "HIServices", "libc"] }
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGEventSource", "CGRemoteOperation", "libc"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "libc"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString", "NSUUID"] }

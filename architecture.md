@@ -1,5 +1,7 @@
 # Unimation architecture
 
+Implementation status, 2026-09-15: the first Cargo workspace now uses direct Rust `objc2` macOS providers, with independently selectable AX and Quartz components. A Swift helper is not required. The CLI uses `jdx/usage`. See [README](README.md), [backend tasks](docs/backends.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
+
 Status: working design, 2026-09-15. This repository contains a design, not an implemented or validated automation runtime. Command names and Rust contracts below are proposals. Platform mechanisms have been researched through source code and documentation; their presence does not establish Unimation support.
 
 Reading guide: [target and reference model](#3-target-model-trees-plus-relationships), [windows and transient UI](#6-windows-popups-and-modal-interaction), [execution behavior](#9-operation-contract), [Rust composition](#14-rust-composition-and-provider-lifecycle), [conformance](#18-conformance-and-compatibility-testing), and [research evidence](#20-research-evidence).

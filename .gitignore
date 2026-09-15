@@ -1,0 +1,4 @@
+/target/
+/native/macos/.build/
+*.swp
+.DS_Store
