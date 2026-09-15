@@ -1,0 +1,404 @@
+--- a/droidmux-pairing/Cargo.toml
++++ b/droidmux-pairing/Cargo.toml
+@@ -1,39 +1,41 @@
+ [package]
+ name = "droidmux-pairing"
+ description = "Native Android 11+ wireless debugging pairing and TLS for DroidMux"
+-version.workspace = true
+-edition.workspace = true
+-rust-version.workspace = true
+-authors.workspace = true
+-license.workspace = true
+-repository.workspace = true
++version = "0.1.0"
++edition = "2024"
++rust-version = "1.85"
++authors = ["DroidMux contributors"]
++license = "MIT OR Apache-2.0"
++repository = "https://github.com/poapoauu/DroidMux"
+ publish = true
+ documentation = "https://docs.rs/droidmux-pairing"
+ 
+ [dependencies]
+-adb-auth.workspace = true
+-adb-client.workspace = true
+-adb-protocol.workspace = true
+-adb-transport.workspace = true
+-adb-transport-tcp.workspace = true
+-aes-gcm.workspace = true
+-async-trait.workspace = true
+-bytes.workspace = true
+-curve25519-dalek.workspace = true
+-hkdf.workspace = true
+-rand.workspace = true
+-rcgen.workspace = true
+-rustls.workspace = true
+-secrecy.workspace = true
+-sha2.workspace = true
+-subtle.workspace = true
+-thiserror.workspace = true
+-tokio-rustls.workspace = true
+-tokio.workspace = true
+-zeroize.workspace = true
++x509-cert = { version = "0.2", default-features = false, features = ["std"] }
++adb-auth = { package = "droidmux-auth", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-client = { package = "droidmux-client", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-protocol = { package = "droidmux-protocol", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-transport = { package = "droidmux-transport", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-transport-tcp = { package = "droidmux-transport-tcp", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++aes-gcm = { version = "0.10.3", features = ["zeroize"] }
++async-trait = "0.1.91"
++bytes = "1.12.1"
++curve25519-dalek = { version = "4.1.3", features = ["rand_core", "zeroize"] }
++hkdf = "0.12.4"
++rand = "0.8.7"
++rcgen = { version = "0.13.2", default-features = false, features = ["pem", "ring", "zeroize"] }
++rustls = { version = "0.23.35", default-features = false, features = ["ring", "std"] }
++secrecy = "0.10.3"
++sha2 = "0.10.9"
++subtle = "2.6.1"
++thiserror = "2.0.19"
++tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
++tokio = { version = "1.53.1", features = ["full"] }
++zeroize = "1.9.0"
+ 
+ [dev-dependencies]
+-adb-shell.workspace = true
++adb-shell = { package = "droidmux-shell", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+ 
+-[lints]
+-workspace = true
++
++
++[workspace]
+--- /dev/null
++++ b/droidmux-pairing/UNIMATION.md
+@@ -0,0 +1,14 @@
++# Vendored pairing patch
++
++Source: https://github.com/poapoauu/DroidMux at d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e. MIT OR Apache-2.0, license files preserved. Other DroidMux packages remain pinned git dependencies.
++
++Local changes:
++
++- Allow bounded printable ASCII QR secrets as well as six-digit pairing codes. No cryptographic primitive changes.
++- Add `connect_paired_device_with_config` and explicit connection public-key policy. A default connection refuses an unknown certificate. An explicit first-connect collector records SHA256 of SubjectPublicKeyInfo, or an expected SPKI fingerprint must match before promoting the transport to usable TLS.
++- Pairing certificate and connection certificate are separate. AOSP pairing_server_new creates a fresh RSA key in pairing_connection/pairing_server.cpp; adbd_tls_handshake creates its own process key in daemon/auth.cpp. Pinning one as the other would reject legitimate devices. Our connection trust is explicit trust-on-first-use, not identity authenticated by the pairing exchange.
++- Pairing mock integration test now explicitly opts into first-connection trust.
++
++AOSP transport.cpp regenerates X509 certificates for each connection using the daemon process RSA key. We hash parsed DER SubjectPublicKeyInfo using RustCrypto x509-cert, so certificate metadata changes do not change the pin. A daemon restart can change the actual public key. This fails closed; explicit reset/retrust is not implemented yet. DroidMux is an unpublished early project; local mock tests do not replace physical-device interoperability testing or a cryptographic audit.
++
++Connection records are tagged `public_key_sha256`. Old whole-certificate string pins are rejected, not silently reinterpreted. Tests reissue certificates with the same key and verify equal pins, then change the key and verify unequal pins.
+--- a/droidmux-pairing/src/error.rs
++++ b/droidmux-pairing/src/error.rs
+@@ -10,8 +10,8 @@
+ #[derive(Debug, Error)]
+ #[non_exhaustive]
+ pub enum PairingError {
+-    /// The pairing code must contain exactly six ASCII digits.
+-    #[error("pairing code must contain exactly six ASCII digits")]
++    /// The pairing secret must contain 1 to 128 printable ASCII bytes.
++    #[error("pairing secret must contain 1 to 128 printable ASCII bytes")]
+     InvalidPairingCode,
+     /// The remote endpoint is not valid.
+     #[error("invalid wireless endpoint: {0}")]
+@@ -37,7 +37,7 @@
+     #[error("wireless pairing protocol error: {0}")]
+     Protocol(String),
+     /// `PeerInfo` authentication failed, normally because the code was wrong.
+-    #[error("the six-digit pairing code was rejected")]
++    #[error("the pairing secret was rejected")]
+     IncorrectPairingCode,
+     /// Android returned an invalid device GUID.
+     #[error("the paired device returned an invalid device identifier")]
+--- a/droidmux-pairing/src/integration_tests.rs
++++ b/droidmux-pairing/src/integration_tests.rs
+@@ -23,7 +23,8 @@
+ 
+ use crate::{
+     CredentialStore, CredentialStoreError, DirectConnectionRequest, PairingError, PairingRequest,
+-    StoredHostCredential, StoredPairedDevice, connect_paired_device, connect_tcp_device,
++    StoredHostCredential, StoredPairedDevice, connect_paired_device_with_config,
++    connect_tcp_device,
+     crypto::{PairingCipher, Spake2State},
+     pair_device,
+     protocol::{PacketType, PeerInfo, read_packet, write_packet},
+@@ -146,8 +147,17 @@
+ 
+     // A cloned store models a new application service instance after restart.
+     let restarted_store = store.clone();
+-    let client =
+-        connect_paired_device(DEVICE_ID, "127.0.0.1", connect_port, &restarted_store).await?;
++    let client = connect_paired_device_with_config(
++        DEVICE_ID,
++        "127.0.0.1",
++        connect_port,
++        &restarted_store,
++        crate::WirelessTransportConfig {
++            first_connection_fingerprint: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
++            ..Default::default()
++        },
++    )
++    .await?;
+     let output = execute(&client, "getprop ro.product.model").await?;
+     assert_eq!(output.stdout, Bytes::from_static(b"DroidMux Test Device\n"));
+     assert!(output.stderr.is_empty());
+--- a/droidmux-pairing/src/lib.rs
++++ b/droidmux-pairing/src/lib.rs
+@@ -21,7 +21,8 @@
+ pub use error::PairingError;
+ pub use pair::{
+     DirectConnectionRequest, PairingRequest, PairingResult, connect_known_tcp_device,
+-    connect_paired_device, connect_tcp_device, pair_and_connect, pair_device,
++    connect_paired_device, connect_paired_device_with_config, connect_tcp_device, pair_and_connect,
++    pair_device,
+ };
+ pub use secrecy::SecretString;
+ pub use transport::{WirelessTransport, WirelessTransportConfig};
+--- a/droidmux-pairing/src/pair.rs
++++ b/droidmux-pairing/src/pair.rs
+@@ -27,7 +27,7 @@
+     pub host: String,
+     /// Dynamic `_adb-tls-pairing._tcp` port.
+     pub port: u16,
+-    /// Six-digit one-time code displayed by Android.
++    /// One-time numeric code or printable QR secret.
+     pub pairing_code: SecretString,
+     /// Comment embedded in the reusable ADB RSA public key.
+     pub client_name: String,
+@@ -164,6 +164,23 @@
+     port: u16,
+     credential_store: &dyn CredentialStore,
+ ) -> Result<AdbClient, PairingError> {
++    connect_paired_device_with_config(
++        device_id,
++        host,
++        port,
++        credential_store,
++        WirelessTransportConfig::default(),
++    )
++    .await
++}
++
++pub async fn connect_paired_device_with_config(
++    device_id: &str,
++    host: impl Into<String>,
++    port: u16,
++    credential_store: &dyn CredentialStore,
++    config: WirelessTransportConfig,
++) -> Result<AdbClient, PairingError> {
+     if credential_store
+         .load_paired_device(device_id)
+         .await?
+@@ -181,9 +198,7 @@
+         stored.expose_private_key_pem(),
+         stored.client_name(),
+     )?);
+-    let transport =
+-        WirelessTransport::connect(host, port, &credential, WirelessTransportConfig::default())
+-            .await?;
++    let transport = WirelessTransport::connect(host, port, &credential, config).await?;
+     Ok(AdbClient::connect(Box::new(transport), credential).await?)
+ }
+ 
+@@ -286,7 +301,7 @@
+ 
+ fn validate_request(request: &PairingRequest) -> Result<(), PairingError> {
+     let code = request.pairing_code.expose_secret().as_bytes();
+-    if code.len() != 6 || !code.iter().all(u8::is_ascii_digit) {
++    if code.is_empty() || code.len() > 128 || !code.iter().all(u8::is_ascii_graphic) {
+         return Err(PairingError::InvalidPairingCode);
+     }
+     validate_endpoint(&request.host, request.port)?;
+@@ -357,8 +372,8 @@
+     }
+ 
+     #[test]
+-    fn only_six_ascii_digits_are_accepted() {
+-        for invalid in ["12345", "1234567", "12a456", "１２３４５６"] {
++    fn empty_whitespace_and_non_ascii_secrets_are_rejected() {
++        for invalid in ["", " 12345", "12\n456", "１２３４５６"] {
+             let request = PairingRequest {
+                 host: "127.0.0.1".to_owned(),
+                 port: 37_001,
+--- a/droidmux-pairing/src/tls.rs
++++ b/droidmux-pairing/src/tls.rs
+@@ -186,3 +186,55 @@
+         self.supported.supported_schemes()
+     }
+ }
++
++/// Hash the SPKI, not DER certificate metadata, which adbd regenerates per connection.
++pub(crate) fn public_key_fingerprint(der: &[u8]) -> Result<String, PairingError> {
++    use x509_cert::der::{Decode, Encode};
++    let certificate = x509_cert::Certificate::from_der(der)
++        .map_err(|_| PairingError::Tls("invalid X509 certificate".into()))?;
++    let spki = certificate
++        .tbs_certificate
++        .subject_public_key_info
++        .to_der()
++        .map_err(|_| PairingError::Tls("invalid subject public key info".into()))?;
++    let digest = Sha256::digest(spki);
++    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
++}
++pub(crate) fn peer_public_key_fingerprint(
++    stream: &TlsStream<TcpStream>,
++) -> Result<String, PairingError> {
++    let certificate = stream
++        .get_ref()
++        .1
++        .peer_certificates()
++        .and_then(|certificates| certificates.first())
++        .ok_or_else(|| PairingError::Tls("peer did not provide a certificate".into()))?;
++    public_key_fingerprint(certificate.as_ref())
++}
++#[cfg(test)]
++mod public_key_tests {
++    use super::*;
++    #[test]
++    fn reissued_certificate_has_same_pin_but_new_key_changes_pin() {
++        let key = KeyPair::generate().unwrap();
++        let mut first = CertificateParams::default();
++        first.serial_number = Some(SerialNumber::from(1_u64));
++        let mut second = first.clone();
++        second.serial_number = Some(SerialNumber::from(2_u64));
++        let first = first.self_signed(&key).unwrap();
++        let second = second.self_signed(&key).unwrap();
++        assert_ne!(first.der(), second.der());
++        assert_eq!(
++            public_key_fingerprint(first.der()).unwrap(),
++            public_key_fingerprint(second.der()).unwrap()
++        );
++        let changed = CertificateParams::default()
++            .self_signed(&KeyPair::generate().unwrap())
++            .unwrap();
++        assert_ne!(
++            public_key_fingerprint(first.der()).unwrap(),
++            public_key_fingerprint(changed.der()).unwrap()
++        );
++        assert!(public_key_fingerprint(b"invalid").is_err());
++    }
++}
+--- a/droidmux-pairing/src/transport.rs
++++ b/droidmux-pairing/src/transport.rs
+@@ -1,4 +1,8 @@
+-use std::{io, time::Duration};
++use std::{
++    io,
++    sync::{Arc, Mutex},
++    time::Duration,
++};
+ 
+ use adb_auth::RsaAdbCredential;
+ use adb_protocol::{ADB_HEADER_LEN, AdbCommand, AdbHeader, AdbPacket, AdbProtocolError};
+@@ -14,13 +18,13 @@
+ 
+ use crate::{
+     PairingError,
+-    tls::{TlsIdentity, connect_tls},
++    tls::{TlsIdentity, connect_tls, peer_public_key_fingerprint},
+ };
+ 
+ const STLS_VERSION: u32 = 0x0100_0000;
+ 
+ /// Deadlines and socket options for an Android wireless TLS connection.
+-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++#[derive(Debug, Clone)]
+ pub struct WirelessTransportConfig {
+     /// Maximum time allowed for TCP and TLS connection setup.
+     pub connect_timeout: Duration,
+@@ -32,6 +36,10 @@
+     pub close_timeout: Duration,
+     /// Whether to disable Nagle's algorithm.
+     pub no_delay: bool,
++    /// Expected SHA256 of connection SubjectPublicKeyInfo; distinct from pairing certificate.
++    pub expected_fingerprint: Option<String>,
++    /// Explicit first-connection trust records the observed certificate here.
++    pub first_connection_fingerprint: Option<Arc<Mutex<Option<String>>>>,
+ }
+ 
+ impl Default for WirelessTransportConfig {
+@@ -42,6 +50,8 @@
+             write_timeout: Duration::from_secs(30),
+             close_timeout: Duration::from_secs(5),
+             no_delay: true,
++            expected_fingerprint: None,
++            first_connection_fingerprint: None,
+         }
+     }
+ }
+@@ -176,6 +186,10 @@
+                 });
+             }
+         };
++        let fingerprint = peer_public_key_fingerprint(&tls).map_err(|e| {
++            transport_io_error(TransportOperation::Connect, io::Error::other(e.to_string()))
++        })?;
++        verify_connection_fingerprint(&self.config, fingerprint)?;
+         self.connection = Connection::Tls(Box::new(tls));
+         Ok(())
+     }
+@@ -342,3 +356,64 @@
+         _ => AdbTransportError::Io { operation, source },
+     }
+ }
++
++fn verify_connection_fingerprint(
++    config: &WirelessTransportConfig,
++    fingerprint: String,
++) -> Result<(), AdbTransportError> {
++    match &config.expected_fingerprint {
++        Some(expected) if expected != &fingerprint => {
++            return Err(transport_io_error(
++                TransportOperation::Connect,
++                io::Error::other("connection public key changed"),
++            ));
++        }
++        Some(_) => {}
++        None => {
++            let observed = config
++                .first_connection_fingerprint
++                .as_ref()
++                .ok_or_else(|| {
++                    transport_io_error(
++                        TransportOperation::Connect,
++                        io::Error::other("first connection requires explicit trust"),
++                    )
++                })?;
++            *observed.lock().map_err(|_| {
++                transport_io_error(
++                    TransportOperation::Connect,
++                    io::Error::other("certificate state poisoned"),
++                )
++            })? = Some(fingerprint);
++        }
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod trust_tests {
++    use super::*;
++    #[test]
++    fn unknown_and_changed_certificates_fail_closed() {
++        assert!(
++            verify_connection_fingerprint(&WirelessTransportConfig::default(), "new".into())
++                .is_err()
++        );
++        let config = WirelessTransportConfig {
++            expected_fingerprint: Some("known".into()),
++            ..Default::default()
++        };
++        assert!(verify_connection_fingerprint(&config, "new".into()).is_err());
++        assert!(verify_connection_fingerprint(&config, "known".into()).is_ok());
++    }
++    #[test]
++    fn explicit_first_connection_records_certificate() {
++        let observed = Arc::new(Mutex::new(None));
++        let config = WirelessTransportConfig {
++            first_connection_fingerprint: Some(observed.clone()),
++            ..Default::default()
++        };
++        verify_connection_fingerprint(&config, "first".into()).unwrap();
++        assert_eq!(*observed.lock().unwrap(), Some("first".into()));
++    }
++}

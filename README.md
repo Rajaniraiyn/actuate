@@ -101,3 +101,14 @@ compact snapshots, diffs, temporary device cleanup and current limitations.
 platform-owned sessions and the shared overlay library. The optional standalone iOS
 command is built with `cargo build -p ios --features cli`. Rust embeddings call the
 library directly and do not need either CLI executable.
+
+
+Android development currently requires one dependency preparation step before Cargo:
+
+```sh
+python3 scripts/prepare-deps.py
+cargo build -p cli
+```
+
+The repository maintains small upstream patches, not dependency source trees.
+See [dependency preparation and offline builds](docs/dependencies.md).

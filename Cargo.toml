@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+exclude = ["target/patched-deps/droidmux-pairing", "target/patched-deps/droidmux-shell", "target/patched-deps/droidmux-client"]
 resolver = "2"
 
 [workspace.package]
@@ -15,3 +16,8 @@ macos = { path = "crates/macos" }
 ios = { path = "crates/ios" }
 usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics", "completions"] }
 overlay = { path = "crates/overlay" }
+
+[patch."https://github.com/poapoauu/DroidMux"]
+droidmux-pairing = { path = "target/patched-deps/droidmux-pairing" }
+droidmux-shell = { path = "target/patched-deps/droidmux-shell" }
+droidmux-client = { path = "target/patched-deps/droidmux-client" }

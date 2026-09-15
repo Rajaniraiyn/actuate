@@ -11,6 +11,8 @@ enum Provider {
     #[cfg(feature = "idevice")]
     #[usage(name = "apple-device")]
     Idevice,
+    #[cfg(feature = "android")]
+    Android,
 }
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum Format {
@@ -56,12 +58,18 @@ struct App {
         value_enum
     )]
     provider: Provider,
-    /// Explicit provider device UDID; no implicit first-device selection.
+    /// Provider device identifier: Apple UDID, Android IP:port, or usb:VID:PID.
     #[usage(long, global, env = "UNIMATION_DEVICE")]
     device: Option<String>,
     /// Existing simulator device set, required for apple-simulator.
     #[usage(long, global, env = "UNIMATION_DEVICE_SET", value_hint = usage::ValueHint::DirPath)]
     device_set: Option<std::path::PathBuf>,
+    /// Explicit Android credential directory, or PEM key for USB.
+    #[usage(long, global, env = "UNIMATION_CREDENTIALS", value_hint = usage::ValueHint::AnyPath)]
+    credentials: Option<std::path::PathBuf>,
+    /// Record the first wireless public key; subsequent key changes fail.
+    #[usage(long, global)]
+    trust_first_connection: bool,
     /// Output format. Text is plain and identical in terminals and pipes.
     #[usage(long, global, default = "text", value_enum)]
     format: Format,
@@ -79,6 +87,12 @@ enum Shell {
 }
 #[derive(Subcommands)]
 enum Command {
+    /// Android connection setup; device automation uses shared commands.
+    #[cfg(feature = "android")]
+    Android {
+        #[usage(subcommand)]
+        command: AndroidCommand,
+    },
     /// Generate a shell completion script using the command specification.
     Completions {
         #[usage(value_enum)]
@@ -188,6 +202,23 @@ enum SimulatorCommand {
     /// List native runtime, device-type and device records.
     List,
 }
+#[cfg(feature = "android")]
+#[derive(Subcommands)]
+enum AndroidCommand {
+    /// Create a persistent private host key for direct USB/classic TCP.
+    InitKey { path: std::path::PathBuf },
+    /// Pair an Android wireless-debugging endpoint; read the code from stdin.
+    Pair { endpoint: std::net::SocketAddr },
+    /// Show a QR code, discover the scanner, and pair without an ADB server.
+    PairQr {
+        #[usage(long)]
+        qr_svg: Option<std::path::PathBuf>,
+        #[usage(long, default = "120")]
+        timeout_secs: u64,
+    },
+    /// List USB devices without authorizing or selecting one.
+    Devices,
+}
 #[cfg(feature = "idevice")]
 #[derive(Subcommands)]
 enum DeviceCommand {
@@ -195,6 +226,8 @@ enum DeviceCommand {
 }
 
 struct Connection {
+    credentials: Option<std::path::PathBuf>,
+    trust_first_connection: bool,
     provider: Provider,
     device: Option<String>,
     device_set: Option<std::path::PathBuf>,
@@ -224,6 +257,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let connection = Connection {
+        credentials: app.credentials,
+        trust_first_connection: app.trust_first_connection,
         provider: app.provider,
         device: app.device,
         device_set: app.device_set,
@@ -333,6 +368,15 @@ fn run(
     connection: Connection,
     format: unimation::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "android")]
+    if matches!(command, Command::Android { .. }) || connection.provider == Provider::Android {
+        return run_android(command, connection, format);
+    }
+    if connection.credentials.is_some() || connection.trust_first_connection {
+        return Err(
+            "--credentials and --trust-first-connection apply to Android connections".into(),
+        );
+    }
     #[cfg(feature = "idevice")]
     let command = if matches!(
         command,
@@ -490,6 +534,8 @@ fn run_host(
     let mut ax = macos::Accessibility::new();
     let result = match command {
         Command::Apple { .. } => unreachable!(),
+        #[cfg(feature = "android")]
+        Command::Android { .. } => unreachable!(),
         Command::Discover { scope } => {
             let scope = match scope {
                 DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
@@ -701,4 +747,183 @@ fn emit_snapshot(
 
 fn emit_value(value: &serde_json::Value, format: unimation::OutputFormat) -> std::io::Result<()> {
     unimation::output::write_value(std::io::stdout().lock(), value, format)
+}
+
+#[cfg(feature = "android")]
+fn run_android(
+    command: Command,
+    connection: Connection,
+    format: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use android::wireless::{FirstConnectionPolicy, WirelessHost};
+    use std::io::Write;
+    use std::time::Duration;
+    if connection.device_set.is_some() {
+        return Err("--device-set is specific to CoreSimulator".into());
+    }
+    if matches!(
+        command,
+        Command::Android {
+            command: AndroidCommand::Devices
+        }
+    ) || matches!(
+        command,
+        Command::Discover {
+            scope: DiscoveryScope::All
+        }
+    ) && connection.device.is_none()
+        && connection.credentials.is_none()
+    {
+        return Ok(emit_value(
+            &serde_json::to_value(android::discover_usb()?)?,
+            format,
+        )?);
+    }
+    if let Command::Android {
+        command: AndroidCommand::InitKey { path },
+    } = command
+    {
+        android::init_key(&path)?;
+        return Ok(emit_value(
+            &serde_json::json!({"key":path,"created":true}),
+            format,
+        )?);
+    }
+    if matches!(command, Command::Capabilities) {
+        return Ok(emit_value(
+            &serde_json::json!({"capture":"png_screencap","input":"android_input_command","observation":false,"hid":false,"device_overlay":false,"streaming":false,"transports":["usb","paired_wireless"],"adb_executable_required":false,"adb_server_required":false}),
+            format,
+        )?);
+    }
+    if let Command::Capture {
+        display,
+        window,
+        backend,
+        max_pixel_edge,
+        ..
+    } = &command
+        && (display.is_some()
+            || window.is_some()
+            || *backend != CaptureRoute::Native
+            || max_pixel_edge.is_some())
+    {
+        return Err("Android capture uses the current display at native resolution; alternate capture options are unavailable".into());
+    }
+    let credentials=connection.credentials.as_deref().ok_or("Android requires --credentials PATH: a pairing directory for wireless or a PEM key for usb:VID:PID")?;
+    if let Command::Android { command } = command {
+        let host = WirelessHost::new(credentials, Duration::from_secs(30))?;
+        let paired = match command {
+            AndroidCommand::Pair { endpoint } => {
+                eprintln!("Enter the Wireless debugging pairing code, then press Enter:");
+                let mut code = String::new();
+                std::io::stdin().read_line(&mut code)?;
+                host.pair(endpoint, code.trim())?
+            }
+            AndroidCommand::PairQr {
+                qr_svg,
+                timeout_secs,
+            } => {
+                if timeout_secs == 0 || timeout_secs > 600 {
+                    return Err("--timeout-secs must be 1..=600".into());
+                }
+                let qr = android::qr::QrPairingSession::new()?;
+                if let Some(path) = qr_svg {
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(path)?;
+                    file.write_all(qr.render_svg()?.as_bytes())?;
+                }
+                eprintln!("Scan with Wireless debugging > Pair device with QR code.");
+                eprint!("{}", qr.render_terminal()?);
+                std::io::stderr().flush()?;
+                let endpoint = qr.wait_endpoint(Duration::from_secs(timeout_secs))?;
+                host.pair(endpoint, qr.password())?
+            }
+            AndroidCommand::InitKey { .. } | AndroidCommand::Devices => unreachable!(),
+        };
+        return Ok(emit_value(&serde_json::to_value(paired)?, format)?);
+    }
+    match command {
+        Command::Session{}|Command::Capture{..}|Command::Discover{..}=>{},
+        _=>return Err("Android currently supports discover, capabilities, capture and session; native accessibility snapshots are unavailable".into()),
+    }
+    let discovered;
+    let device = match connection.device.as_deref() {
+        Some(device) => device,
+        None => {
+            let host = WirelessHost::new(credentials, Duration::from_secs(30))?;
+            discovered = android::qr::discover_connection(
+                &host.paired_device_id()?,
+                Duration::from_secs(10),
+            )?
+            .to_string();
+            &discovered
+        }
+    };
+    if let Some(ids) = device.strip_prefix("usb:") {
+        let (vendor, product) = ids
+            .split_once(':')
+            .ok_or("USB device must be usb:VID:PID with hexadecimal IDs")?;
+        let transport = android::DirectDevice::usb(
+            u16::from_str_radix(vendor, 16)?,
+            u16::from_str_radix(product, 16)?,
+            credentials,
+        )?;
+        return execute_android(command, android::Android::new(transport), format);
+    }
+    let endpoint = device.parse::<std::net::SocketAddr>()?;
+    let policy = if connection.trust_first_connection {
+        FirstConnectionPolicy::TrustOnFirstUse
+    } else {
+        FirstConnectionPolicy::RequireKnownCertificate
+    };
+    let transport =
+        WirelessHost::new(credentials, Duration::from_secs(30))?.connect(endpoint, policy)?;
+    execute_android(command, android::Android::new(transport), format)
+}
+#[cfg(feature = "android")]
+fn execute_android<D: android::CommandTransport>(
+    command: Command,
+    mut device: android::Android<D>,
+    format: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        Command::Discover {
+            scope: DiscoveryScope::Apps,
+        } => Ok(android::apps::write_inventory(
+            std::io::stdout().lock(),
+            &device.launcher_activities()?,
+            format,
+        )?),
+        Command::Discover {
+            scope: DiscoveryScope::All,
+        } => Ok(emit_value(&serde_json::to_value(device.info()?)?, format)?),
+        Command::Capture {
+            path,
+            display,
+            window,
+            backend,
+            max_pixel_edge,
+        } => {
+            if display.is_some()
+                || window.is_some()
+                || backend != CaptureRoute::Native
+                || max_pixel_edge.is_some()
+            {
+                return Err("Android capture uses the current display at native resolution; alternate capture options are unavailable".into());
+            }
+            Ok(emit_value(
+                &android::jsonl::capture_file(&mut device, &path)?,
+                format,
+            )?)
+        }
+        Command::Session {} => Ok(android::jsonl::serve(
+            &mut device,
+            std::io::stdin().lock(),
+            std::io::stdout().lock(),
+            format,
+        )?),
+        _ => Err("The selected Android operation is unavailable".into()),
+    }
 }

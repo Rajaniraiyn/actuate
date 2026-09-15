@@ -3,7 +3,7 @@
 Shared commands select their provider through `--provider` or `UNIMATION_PROVIDER`.
 The explicit flag takes precedence over the environment. The default `native` uses
 the host backend, currently macOS. It never selects a simulator merely because one
-is installed. The default build accepts `native`, `macos`, `apple-simulator`, and `apple-device`.
+is installed. The default build accepts `native`, `macos`, `apple-simulator`, `apple-device`, and `android`.
 
 ```sh
 unimation snapshot --format text
@@ -76,6 +76,51 @@ the legacy screenshotr service and does not imply modern iOS screenshot, streami
 accessibility or input support. It requires an existing usbmuxd service and pairing
 record. It does not launch a daemon, pair, install software or mount an image.
 `--device-set` belongs to the CoreSimulator provider and is rejected for apple-device.
+
+## Android setup and connections
+
+The default build includes the Android provider. It does not invoke an adb
+executable or start an adb server. The shared `discover`, `capture`, `capabilities`
+and `session` commands select `--provider android`.
+
+```sh
+# Reads the short pairing code from stdin, not process arguments.
+unimation android pair PHONE_IP:PAIRING_PORT --credentials /private/phone
+# Or display a QR and discover its matching pairing service.
+unimation android pair-qr --credentials /private/phone --timeout-secs 120
+# Optional --qr-svg /new/qr.svg writes a scannable artifact containing the secret.
+
+# First connection trust is explicit; later calls check the stored public key.
+unimation --provider android --credentials /private/phone --device PHONE_IP:CONNECT_PORT --trust-first-connection discover
+unimation --provider android --credentials /private/phone capture /new/screen.png
+unimation --provider android --credentials /private/phone session --json
+```
+
+If `--device` is omitted for a paired credential directory, mDNS resolves the exact
+stored device GUID. Pairing and connection ports are distinct. QR secrets and
+artifacts should be discarded after use. QR output goes to stderr so stdout can
+remain a structured pairing result.
+
+The current file credential store requires Unix permissions. Windows needs a
+protected store implementation before wireless support is available there.
+Pairing and connection certificates are different in Android's protocol. The
+initial connection public key is trusted explicitly and then pinned; a changed
+key fails rather than being accepted silently. An adbd restart can change
+that key. Certificate reissuance with the same key remains valid. Reset/retrust tooling is not implemented yet.
+
+USB setup uses `android init-key /private/host.pem`, `android devices`, then
+`--provider android --device usb:VID:PID --credentials /private/host.pem`. Accept
+Android's USB debugging authorization dialog. VID/PID selection rejects duplicates.
+No APK, keyboard, accessibility service or device overlay is installed automatically.
+
+`discover --scope apps` lists launcher activities, one component per line by
+default. JSON preserves parsed components and the original inventory. Session
+requests include `apps` and `launch` with a validated package/activity component.
+They also include `info`, `capture` with a new output path, `tap` with a
+pixel point, `swipe`, `key` and `type_ascii`. Capture metadata leaves click mapping
+unknown; Android pixels are not macOS desktop points. Accessibility snapshots and
+stable Android element references remain unavailable in this first provider.
+
 
 ## Apple resource groups
 

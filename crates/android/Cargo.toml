@@ -4,5 +4,16 @@ name = "android"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+[features]
+default = ["usb"]
+usb = ["droidmux/usb"]
 [dependencies]
 unimation.workspace = true
+serde.workspace = true
+rand = "0.8"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+droidmux = { git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e", default-features = false, features = ["pairing", "shell"] }
+tokio = { version = "1", features = ["rt", "time"] }
+async-trait = "0.1"
+serde_json.workspace = true
+mdns-sd = { version = "0.21.3", default-features = false }

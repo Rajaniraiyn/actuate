@@ -981,9 +981,43 @@ Its roughly 16-point body is independent of the existing click-ring radius. Nati
 AppKit point rendering handles backing scale, rather than multiplying input desktop
 coordinates by screenshot resolution. Mixed-display visual validation is pending.
 
+## Android transport and automation adapters
+
+`Android<D: CommandTransport>` separates device operations from connection setup.
+Direct USB, classic TCP and paired wireless share pinned DroidMux protocol,
+authentication and shell handling. The duplicate adb_client stack was removed. No adb binary
+or host daemon is launched. USB includes libusb at build time; normal OS drivers and
+permissions remain necessary.
+
+Three temporary local patches record upstream revisions/licenses and address
+stream closure/flow control, QR secret validation and explicit connection-key policy. They are isolated from our workspace implementation.
+Pairing and connection certificates have different lifetimes. Initial connection
+trust is explicit; subsequent changes fail. Credentials live outside the repository.
+
+QR pairing uses the AOSP payload and exact session-name mDNS match. Connection
+resolution separately matches the paired GUID. Discovery has a deadline and never
+chooses an unrelated first service. Secret payloads have no Debug/Serialize output.
+An optional SVG is a secret-bearing setup artifact, not a permanent report.
+
+The initial operations are device information, PNG capture, pixel input, Android
+keys and restricted ASCII typing. A platform-owned typed session and JSONL adapter
+reuse the same methods. UI snapshots, guest overlays and Portal integration remain future adapters.
+`hid::Pointer` is a separate persistent relative-pointer adapter over the installed
+Android hid utility, with framework registration checks and explicit teardown.
+Mouse deltas are accelerated device counts, never inferred screen coordinates. See [Android source audit](docs/android-reference-audit.md)
+for droidrun-rs, adb-wireless and rsadb tradeoffs. No Portal APK is installed here.
+
+
 Apple CLI resource discovery is now grouped under `apple simulators list` and
 `apple devices list`. Public provider values are `apple-simulator` and `apple-device`,
 without legacy aliases during this experimental phase. Only the simulator branch is
 intrinsically macOS-only; physical transport feature gates remain independent. Future
 Apple device families belong behind those provider capabilities, not new top-level
 OS-specific interaction commands.
+
+
+Android dependency fixes are maintained as unified patch files and a checksummed
+upstream archive manifest. `scripts/prepare-deps.py` materializes them under ignored
+`target/patched-deps`; no dependency source tree is checked in. See
+[dependency preparation](docs/dependencies.md). Cargo vendor snapshots are optional
+reproducible build artifacts, separate from these editable patches.

@@ -1,0 +1,504 @@
+--- a/droidmux-client/Cargo.toml
++++ b/droidmux-client/Cargo.toml
+@@ -1,26 +1,27 @@
+ [package]
+ name = "droidmux-client"
+ description = "Authenticated ADB sessions and multiplexed logical streams for DroidMux"
+-version.workspace = true
+-edition.workspace = true
+-rust-version.workspace = true
+-authors.workspace = true
+-license.workspace = true
+-repository.workspace = true
++version = "0.1.0"
++edition = "2024"
++rust-version = "1.85"
++authors = ["DroidMux contributors"]
++license = "MIT OR Apache-2.0"
++repository = "https://github.com/poapoauu/DroidMux"
+ publish = true
+ documentation = "https://docs.rs/droidmux-client"
+ 
+ [dependencies]
+-adb-auth.workspace = true
+-adb-protocol.workspace = true
+-adb-transport.workspace = true
+-async-trait.workspace = true
+-bytes.workspace = true
+-thiserror.workspace = true
+-tokio.workspace = true
++adb-auth = { package = "droidmux-auth", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-protocol = { package = "droidmux-protocol", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-transport = { package = "droidmux-transport", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++async-trait = "0.1.91"
++bytes = "1.12.1"
++thiserror = "2.0.19"
++tokio = { version = "1.53.1", features = ["full"] }
+ 
+ [dev-dependencies]
+-async-trait.workspace = true
++async-trait = "0.1.91"
+ 
+-[lints]
+-workspace = true
++
++
++[workspace]
+--- /dev/null
++++ b/droidmux-client/UNIMATION.md
+@@ -0,0 +1,31 @@
++# Buffered reads after remote close
++
++Source: https://github.com/poapoauu/DroidMux at d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e. MIT OR Apache-2.0 licenses retained.
++
++The upstream router already keeps acknowledgement records after remote CLSE. This patch additionally preserves an already-dequeued payload when its ACK reports StreamClosed and the stream's observed state is an orderly RemoteClosed. Local cancellation, SessionClosed transport errors and protocol violations remain errors.
++
++Invalid stream IDs or inbound flow-control violations previously used the same RemoteClosed state as orderly peer closure. They now set an error state so the buffered-read handling cannot treat those violations as normal EOF.
++
++Existing deterministic tests queue final WRTE+CLSE before reading, drain multiple burst packets after CLSE, and preserve sibling stream usability. Added unit cases cover a retired ACK with buffered data and reject local/session/protocol failures.
++
++## Legacy receive bursts
++
++A Samsung Android 16 device sent stdout and the six-byte Shell v2 exit frame in
++separate WRTE packets before receiving an ACK. Rejecting the second packet lost
++valid output. AOSP's receiver also queues WRTE packets rather than rejecting a
++second pending packet: `adb.cpp` dispatches A_WRTE to `local_socket_enqueue`, and
++`sockets.cpp` applies queue/flush backpressure.
++
++Sources: https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp
++and https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/sockets.cpp
++
++The adapter now buffers bounded legacy bursts and acknowledges every consumed
++packet. The configured per-stream byte limit also applies to legacy mode;
++a 4096-packet ceiling prevents empty/tiny packets from bypassing memory bounds.
++Malformed IDs, excessive buffered data, session loss and cancellations still
++fail explicitly. Tests reproduce stdout+exit+CLSE before consumption, reject
++byte-limit overflow and reject empty-packet floods.
++
++`UNIMATION_ADB_TRACE_METADATA` enables stderr packet direction/type, stream IDs
++and length diagnostics. It never prints shell commands, service names or payload
++contents. Error diagnostics distinguish queue, byte-window and reader failures.
+--- a/droidmux-client/src/client.rs
++++ b/droidmux-client/src/client.rs
+@@ -345,7 +345,7 @@
+     where
+         F: FnMut(ConnectionState) + Send,
+     {
+-        if config.burst_mode && config.delayed_ack_receive_window == 0 {
++        if config.delayed_ack_receive_window == 0 {
+             return Err(AdbClientError::InvalidDelayedAckWindow);
+         }
+         let connection = establish_connection(
+--- a/droidmux-client/src/session.rs
++++ b/droidmux-client/src/session.rs
+@@ -701,6 +701,7 @@
+         },
+     );
+ 
++    trace_packet("tx", &packet);
+     transport
+         .write_packet(&packet)
+         .await
+@@ -750,6 +751,7 @@
+             return Ok(());
+         }
+     };
++    trace_packet("tx", &packet);
+     transport
+         .write_packet(&packet)
+         .await
+@@ -774,14 +776,14 @@
+     let should_acknowledge = router.streams.get(&local_id).is_some_and(|entry| {
+         entry.remote_id == Some(remote_id)
+             && entry.inbound_unacknowledged_packets != 0
+-            && (!delayed_ack || u64::from(bytes) <= entry.inbound_unacknowledged_bytes)
++            && (u64::from(bytes) <= entry.inbound_unacknowledged_bytes)
+     }) || router
+         .closed_inbound_acks
+         .get(&local_id)
+         .is_some_and(|entry| {
+             entry.remote_id == remote_id
+                 && entry.inbound_unacknowledged_packets != 0
+-                && (!delayed_ack || u64::from(bytes) <= entry.inbound_unacknowledged_bytes)
++                && (u64::from(bytes) <= entry.inbound_unacknowledged_bytes)
+         });
+     if !should_acknowledge {
+         return Ok(false);
+@@ -794,6 +796,7 @@
+     };
+     let packet = AdbPacket::new(AdbCommand::Okay, local_id, remote_id, payload)
+         .map_err(|error| error.to_string())?;
++    trace_packet("tx", &packet);
+     transport
+         .write_packet(&packet)
+         .await
+@@ -801,11 +804,9 @@
+     if let Some(entry) = router.streams.get_mut(&local_id) {
+         entry.inbound_unacknowledged_packets =
+             entry.inbound_unacknowledged_packets.saturating_sub(1);
+-        if delayed_ack {
+-            entry.inbound_unacknowledged_bytes = entry
+-                .inbound_unacknowledged_bytes
+-                .saturating_sub(u64::from(bytes));
+-        }
++        entry.inbound_unacknowledged_bytes = entry
++            .inbound_unacknowledged_bytes
++            .saturating_sub(u64::from(bytes));
+     }
+     let remove_closed_ack = router
+         .closed_inbound_acks
+@@ -813,11 +814,9 @@
+         .is_some_and(|entry| {
+             entry.inbound_unacknowledged_packets =
+                 entry.inbound_unacknowledged_packets.saturating_sub(1);
+-            if delayed_ack {
+-                entry.inbound_unacknowledged_bytes = entry
+-                    .inbound_unacknowledged_bytes
+-                    .saturating_sub(u64::from(bytes));
+-            }
++            entry.inbound_unacknowledged_bytes = entry
++                .inbound_unacknowledged_bytes
++                .saturating_sub(u64::from(bytes));
+             entry.inbound_unacknowledged_packets == 0
+         });
+     if remove_closed_ack {
+@@ -874,6 +873,7 @@
+     burst_mode: bool,
+     delayed_ack_receive_window: u32,
+ ) -> Result<(), String> {
++    trace_packet("rx", &packet);
+     match packet.command {
+         AdbCommand::Okay => handle_okay(transport, router, packet, delayed_ack, burst_mode).await,
+         AdbCommand::Write => {
+@@ -988,22 +988,33 @@
+     }
+     let payload_bytes =
+         u64::try_from(packet.payload.len()).map_err(|_| "payload length overflow")?;
+-    let exceeds_window = delayed_ack
+-        && entry
+-            .inbound_unacknowledged_bytes
+-            .saturating_add(payload_bytes)
+-            > u64::from(delayed_ack_receive_window);
+-    if (!delayed_ack && entry.inbound_unacknowledged_packets != 0)
+-        || exceeds_window
+-        || entry.incoming_sender.send(packet.payload).is_err()
+-    {
+-        return close_invalid_stream(transport, router, local_id, remote_id).await;
+-    }
+-    if delayed_ack {
+-        entry.inbound_unacknowledged_bytes = entry
+-            .inbound_unacknowledged_bytes
+-            .saturating_add(payload_bytes);
+-    }
++    // AOSP enqueues incoming WRTEs rather than enforcing one pending packet.
++    // Real adbd may send separate stdout and exit WRTEs before our first ACK.
++    // Retain backpressure and explicit memory bounds instead of rejecting that burst.
++    let exceeds_window = entry
++        .inbound_unacknowledged_bytes
++        .saturating_add(payload_bytes)
++        > u64::from(delayed_ack_receive_window);
++    let reason = if entry.inbound_unacknowledged_packets >= 4096 {
++        Some("receive_packet_limit_exceeded")
++    } else if exceeds_window {
++        Some("receive_window_exceeded")
++    } else if entry.incoming_sender.send(packet.payload).is_err() {
++        Some("reader_dropped")
++    } else {
++        None
++    };
++    if let Some(reason) = reason {
++        let detail = format!(
++            "ADB {reason}: local={local_id} remote={remote_id} delayed_ack={delayed_ack} payload={payload_bytes} pending_bytes={} pending_packets={} window={delayed_ack_receive_window}",
++            entry.inbound_unacknowledged_bytes, entry.inbound_unacknowledged_packets
++        );
++        return close_invalid_stream_with_reason(transport, router, local_id, remote_id, detail)
++            .await;
++    }
++    entry.inbound_unacknowledged_bytes = entry
++        .inbound_unacknowledged_bytes
++        .saturating_add(payload_bytes);
+     entry.inbound_unacknowledged_packets = entry.inbound_unacknowledged_packets.saturating_add(1);
+     Ok(())
+ }
+@@ -1060,6 +1071,7 @@
+         return Ok(());
+     }
+     let response = empty_packet(AdbCommand::Close, 0, packet.arg0)?;
++    trace_packet("tx", &response);
+     transport
+         .write_packet(&response)
+         .await
+@@ -1072,7 +1084,24 @@
+     local_id: u32,
+     remote_id: u32,
+ ) -> Result<(), String> {
+-    if let Some(mut entry) = router.remove_stream(local_id, StreamStatus::RemoteClosed) {
++    close_invalid_stream_with_reason(
++        transport,
++        router,
++        local_id,
++        remote_id,
++        format!("ADB invalid stream state: local={local_id} remote={remote_id}"),
++    )
++    .await
++}
++
++async fn close_invalid_stream_with_reason(
++    transport: &mut dyn AdbTransport,
++    router: &mut RouterState,
++    local_id: u32,
++    remote_id: u32,
++    reason: String,
++) -> Result<(), String> {
++    if let Some(mut entry) = router.remove_stream(local_id, StreamStatus::SessionClosed(reason)) {
+         if let Some(response) = entry.open_response.take() {
+             let _ = response.send(Err(AdbClientError::StreamRejected { local_id }));
+         }
+@@ -1081,6 +1110,7 @@
+         }
+     }
+     let response = empty_packet(AdbCommand::Close, local_id, remote_id)?;
++    trace_packet("tx", &response);
+     transport
+         .write_packet(&response)
+         .await
+@@ -1095,6 +1125,7 @@
+         return Ok(());
+     }
+     let response = empty_packet(AdbCommand::Close, 0, remote_id)?;
++    trace_packet("tx", &response);
+     transport
+         .write_packet(&response)
+         .await
+@@ -1162,3 +1193,16 @@
+         }
+     }
+ }
++
++// Diagnostic metadata only: service names, commands and payload bytes are never logged.
++fn trace_packet(direction: &str, packet: &AdbPacket) {
++    if std::env::var_os("UNIMATION_ADB_TRACE_METADATA").is_some() {
++        eprintln!(
++            "adb {direction} {:?} arg0={} arg1={} length={}",
++            packet.command,
++            packet.arg0,
++            packet.arg1,
++            packet.payload.len()
++        );
++    }
++}
+--- a/droidmux-client/src/stream.rs
++++ b/droidmux-client/src/stream.rs
+@@ -140,10 +140,10 @@
+             })
+             .await
+             .map_err(|_| self.current_session_error())?;
+-        response_receiver
+-            .await
+-            .map_err(|_| self.current_session_error())??;
+-        Ok(Some(payload))
++        let acknowledgement = response_receiver
++            .await
++            .map_err(|_| self.current_session_error())?;
++        finish_buffered_read(payload, acknowledgement, &self.inner.status.borrow())
+     }
+ 
+     /// Sends one `WRTE` payload and waits for the peer's `OKAY` response.
+@@ -308,3 +308,66 @@
+         reason: "session task stopped".to_owned(),
+     }
+ }
++
++// The bytes have already been received. An orderly peer close can retire their
++// ACK bookkeeping before the reader consumes them. Do not discard those bytes,
++// but propagate transport failures, cancellation and protocol rejection.
++fn finish_buffered_read(
++    payload: Bytes,
++    acknowledgement: Result<(), AdbStreamError>,
++    status: &StreamStatus,
++) -> Result<Option<Bytes>, AdbStreamError> {
++    match acknowledgement {
++        Ok(()) => Ok(Some(payload)),
++        Err(AdbStreamError::StreamClosed) if matches!(status, StreamStatus::RemoteClosed) => {
++            Ok(Some(payload))
++        }
++        Err(AdbStreamError::StreamClosed) if matches!(status, StreamStatus::SessionClosed(_)) => {
++            stream_read_result(status)
++        }
++        Err(error) => Err(error),
++    }
++}
++#[cfg(test)]
++mod buffered_read_tests {
++    use super::*;
++    #[test]
++    fn orderly_close_can_retire_ack_without_discarding_received_payload() {
++        let bytes = Bytes::from_static(b"last received data");
++        assert_eq!(
++            finish_buffered_read(
++                bytes.clone(),
++                Err(AdbStreamError::StreamClosed),
++                &StreamStatus::RemoteClosed
++            )
++            .unwrap(),
++            Some(bytes.clone())
++        );
++        assert!(
++            finish_buffered_read(
++                bytes.clone(),
++                Err(AdbStreamError::StreamClosed),
++                &StreamStatus::LocalClosed
++            )
++            .is_err()
++        );
++        assert!(
++            finish_buffered_read(
++                bytes.clone(),
++                Err(AdbStreamError::SessionClosed {
++                    reason: "transport lost".into()
++                }),
++                &StreamStatus::RemoteClosed
++            )
++            .is_err()
++        );
++        assert!(
++            finish_buffered_read(
++                bytes,
++                Err(AdbStreamError::StreamClosed),
++                &StreamStatus::SessionClosed("invalid peer sequence".into())
++            )
++            .is_err()
++        );
++    }
++}
+--- a/droidmux-client/tests/multiplexing.rs
++++ b/droidmux-client/tests/multiplexing.rs
+@@ -118,6 +118,17 @@
+     mpsc::UnboundedReceiver<AdbPacket>,
+     Arc<AtomicBool>,
+ ) {
++    connected_legacy_client(AdbClientConfig::default()).await
++}
++
++async fn connected_legacy_client(
++    config: AdbClientConfig,
++) -> (
++    AdbClient,
++    mpsc::UnboundedSender<Result<AdbPacket, AdbTransportError>>,
++    mpsc::UnboundedReceiver<AdbPacket>,
++    Arc<AtomicBool>,
++) {
+     let (inbound_sender, inbound_receiver) = mpsc::unbounded_channel();
+     let (write_sender, mut write_receiver) = mpsc::unbounded_channel();
+     let closed = Arc::new(AtomicBool::new(false));
+@@ -130,7 +141,7 @@
+         writes: write_sender,
+         closed: closed.clone(),
+     };
+-    let client = AdbClient::connect(Box::new(transport), credential())
++    let client = AdbClient::connect_with_config(Box::new(transport), credential(), config)
+         .await
+         .expect("the channel transport should connect");
+     let connect = receive_packet(&mut write_receiver).await;
+@@ -834,3 +845,101 @@
+     assert_send_sync::<AdbClient>();
+     assert_send_sync::<AdbStream>();
+ }
++
++#[tokio::test]
++async fn legacy_stdout_and_exit_burst_survives_close_before_consumption() {
++    let (client, inbound, mut writes, _) = connected_client().await;
++    let stream = open_stream(
++        &client,
++        &inbound,
++        &mut writes,
++        "shell,v2,raw:test",
++        701,
++        None,
++    )
++    .await;
++    let packets = [Bytes::from_static(b"stdout"), Bytes::from_static(b"exit")];
++    for payload in &packets {
++        inbound
++            .send(Ok(AdbPacket::new(
++                AdbCommand::Write,
++                stream.remote_id(),
++                stream.local_id(),
++                payload.clone(),
++            )
++            .unwrap()))
++            .unwrap();
++    }
++    inbound
++        .send(Ok(empty_packet(
++            AdbCommand::Close,
++            stream.remote_id(),
++            stream.local_id(),
++        )))
++        .unwrap();
++    // The router processed both WRTEs and CLSE before the consumer runs.
++    assert_eq!(receive_packet(&mut writes).await.command, AdbCommand::Close);
++    for payload in packets {
++        assert_eq!(stream.read().await.unwrap(), Some(payload));
++        let ack = receive_packet(&mut writes).await;
++        assert_eq!(ack.command, AdbCommand::Okay);
++        assert!(ack.payload.is_empty());
++    }
++    assert_eq!(stream.read().await.unwrap(), None);
++    client.close().await.unwrap();
++}
++
++#[tokio::test]
++async fn legacy_buffer_limit_remains_enforced() {
++    let (client, inbound, mut writes, _) = connected_legacy_client(AdbClientConfig {
++        delayed_ack_receive_window: 8,
++        ..Default::default()
++    })
++    .await;
++    let stream = open_stream(&client, &inbound, &mut writes, "shell:bounded", 702, None).await;
++    for payload in [Bytes::from_static(b"12345"), Bytes::from_static(b"6789")] {
++        inbound
++            .send(Ok(AdbPacket::new(
++                AdbCommand::Write,
++                stream.remote_id(),
++                stream.local_id(),
++                payload,
++            )
++            .unwrap()))
++            .unwrap();
++    }
++    assert_eq!(receive_packet(&mut writes).await.command, AdbCommand::Close);
++    let failure = stream.read().await.unwrap_err().to_string();
++    assert!(failure.contains("receive_window_exceeded"), "{failure}");
++    client.close().await.unwrap();
++}
++
++#[tokio::test]
++async fn legacy_empty_packets_cannot_bypass_queue_limit() {
++    let (client, inbound, mut writes, _) = connected_client().await;
++    let stream = open_stream(
++        &client,
++        &inbound,
++        &mut writes,
++        "shell:bounded-empty",
++        703,
++        None,
++    )
++    .await;
++    for _ in 0..4097 {
++        inbound
++            .send(Ok(empty_packet(
++                AdbCommand::Write,
++                stream.remote_id(),
++                stream.local_id(),
++            )))
++            .unwrap();
++    }
++    assert_eq!(receive_packet(&mut writes).await.command, AdbCommand::Close);
++    let failure = stream.read().await.unwrap_err().to_string();
++    assert!(
++        failure.contains("receive_packet_limit_exceeded"),
++        "{failure}"
++    );
++    client.close().await.unwrap();
++}

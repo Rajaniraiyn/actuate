@@ -1,0 +1,183 @@
+--- a/droidmux-shell/Cargo.toml
++++ b/droidmux-shell/Cargo.toml
+@@ -1,27 +1,28 @@
+ [package]
+ name = "droidmux-shell"
+ description = "Shell v2 and legacy Android shell sessions for DroidMux"
+-version.workspace = true
+-edition.workspace = true
+-rust-version.workspace = true
+-authors.workspace = true
+-license.workspace = true
+-repository.workspace = true
++version = "0.1.0"
++edition = "2024"
++rust-version = "1.85"
++authors = ["DroidMux contributors"]
++license = "MIT OR Apache-2.0"
++repository = "https://github.com/poapoauu/DroidMux"
+ publish = true
+ documentation = "https://docs.rs/droidmux-shell"
+ 
+ [dependencies]
+-adb-client.workspace = true
+-adb-protocol.workspace = true
+-bytes.workspace = true
+-thiserror.workspace = true
+-tokio.workspace = true
++adb-client = { package = "droidmux-client", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-protocol = { package = "droidmux-protocol", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++bytes = "1.12.1"
++thiserror = "2.0.19"
++tokio = { version = "1.53.1", features = ["full"] }
+ 
+ [dev-dependencies]
+-adb-auth.workspace = true
+-adb-transport.workspace = true
+-adb-transport-tcp.workspace = true
+-async-trait.workspace = true
++adb-auth = { package = "droidmux-auth", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-transport = { package = "droidmux-transport", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++adb-transport-tcp = { package = "droidmux-transport-tcp", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
++async-trait = "0.1.91"
+ 
+-[lints]
+-workspace = true
++
++
++[workspace]
+--- /dev/null
++++ b/droidmux-shell/UNIMATION.md
+@@ -0,0 +1,7 @@
++# Vendored shell completion patch
++
++Source: https://github.com/poapoauu/DroidMux at d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e. MIT OR Apache-2.0 licenses retained.
++
++After receiving a complete Shell v2 exit packet, a concurrent remote CLSE can make final local cleanup return StreamClosed or RemoteClosed. Preserve the explicit exit code in precisely that case. Missing exit, malformed framing, session loss and other transport errors remain errors. Legacy EOF does not become a successful explicit exit.
++
++Tests include WRTE containing stdout/stderr/exit immediately followed by remote CLSE, plus focused cleanup cases distinguishing logical closure from session failure.
+--- a/droidmux-shell/src/session.rs
++++ b/droidmux-shell/src/session.rs
+@@ -275,7 +275,7 @@
+     let (canceled, canceled_receiver) = watch::channel(false);
+     let reader_stream = stream.clone();
+     let reader_task = tokio::spawn(async move {
+-        let mut result = if options.use_v2 {
++        let result = if options.use_v2 {
+             read_v2(
+                 &reader_stream,
+                 &stdout_sender,
+@@ -288,11 +288,7 @@
+         };
+         drop(stdout_sender);
+         drop(stderr_sender);
+-        if let Err(error) = reader_stream.close().await {
+-            if result.is_ok() {
+-                result = Err(TerminalError::Stream(error));
+-            }
+-        }
++        let result = finish_cleanup(result, reader_stream.close().await);
+         completion_sender.send_replace(CompletionState::Finished(result));
+     });
+ 
+@@ -576,3 +572,49 @@
+         }
+     }
+ }
++
++// A remote CLSE can race cleanup after the complete, validated v2 exit packet.
++// Only that status survives a normal logical-stream close; session loss is an error.
++fn finish_cleanup(
++    result: Result<Option<u8>, TerminalError>,
++    cleanup: Result<(), AdbStreamError>,
++) -> Result<Option<u8>, TerminalError> {
++    match cleanup {
++        Ok(()) => result,
++        Err(AdbStreamError::StreamClosed | AdbStreamError::RemoteClosed)
++            if matches!(result, Ok(Some(_))) =>
++        {
++            result
++        }
++        Err(error) if result.is_ok() => Err(TerminalError::Stream(error)),
++        Err(_) => result,
++    }
++}
++#[cfg(test)]
++mod cleanup_tests {
++    use super::*;
++    #[test]
++    fn explicit_exit_survives_logical_close_but_not_transport_loss() {
++        assert!(matches!(
++            finish_cleanup(Ok(Some(7)), Err(AdbStreamError::StreamClosed)),
++            Ok(Some(7))
++        ));
++        assert!(
++            finish_cleanup(
++                Ok(Some(0)),
++                Err(AdbStreamError::SessionClosed {
++                    reason: "lost".into()
++                })
++            )
++            .is_err()
++        );
++        assert!(finish_cleanup(Ok(None), Err(AdbStreamError::StreamClosed)).is_err());
++        assert!(
++            finish_cleanup(
++                Err(TerminalError::Protocol(ShellProtocolError::MissingExitCode)),
++                Err(AdbStreamError::StreamClosed)
++            )
++            .is_err()
++        );
++    }
++}
+--- a/droidmux-shell/tests/shell.rs
++++ b/droidmux-shell/tests/shell.rs
+@@ -426,3 +426,48 @@
+ 
+     assert_send_sync::<droidmux_shell::ShellSession>();
+ }
++
++#[tokio::test]
++async fn completed_v2_exit_survives_remote_close_race() {
++    let (client, inbound, mut writes) = connected_client(true).await;
++    let command = execute(&client, "getprop ro.product.model");
++    let peer = async {
++        let (local_id, remote_id) = accept_open(
++            "shell,v2,raw:getprop ro.product.model",
++            &inbound,
++            &mut writes,
++        )
++        .await;
++
++        let mut response = BytesMut::new();
++        response.extend_from_slice(&shell_frame(1, b"Pixel\n"));
++        response.extend_from_slice(&shell_frame(2, b"warning\n"));
++        response.extend_from_slice(&shell_frame(3, &[7]));
++        inbound
++            .send(Ok(AdbPacket::new(
++                AdbCommand::Write,
++                remote_id,
++                local_id,
++                response.freeze(),
++            )
++            .expect("the Shell v2 response should be valid")))
++            .expect("the Shell v2 response should reach the client");
++
++        inbound
++            .send(Ok(empty_packet(AdbCommand::Close, remote_id, local_id)))
++            .expect("remote close queues after exit");
++        let first = receive_packet(&mut writes).await;
++        let second = receive_packet(&mut writes).await;
++        assert!(matches!(
++            (first.command, second.command),
++            (AdbCommand::Okay, AdbCommand::Close) | (AdbCommand::Close, AdbCommand::Okay)
++        ));
++    };
++
++    let (output, ()) = tokio::join!(command, peer);
++    let output = output.expect("the Shell v2 command should complete");
++    assert_eq!(output.stdout, Bytes::from_static(b"Pixel\n"));
++    assert_eq!(output.stderr, Bytes::from_static(b"warning\n"));
++    assert_eq!(output.exit_code, Some(7));
++    client.close().await.expect("the client should close");
++}

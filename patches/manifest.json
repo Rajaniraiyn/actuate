@@ -1,0 +1,6 @@
+{
+  "revision": "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e",
+  "archive": "https://codeload.github.com/poapoauu/DroidMux/tar.gz/d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e",
+  "sha256": "44832c942735a1b232d04d01f3af76c227360e3d1e299fa9a5252c97ec095e86",
+  "crates": ["droidmux-client", "droidmux-shell", "droidmux-pairing"]
+}

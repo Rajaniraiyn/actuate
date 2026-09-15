@@ -9,15 +9,20 @@ flag "-p --provider" help="Automation provider; native selects the host, apple-s
             choice macos
             choice apple-simulator
             choice apple-device
+            choice android
         }
     }
 }
-flag --device help="Explicit provider device UDID; no implicit first-device selection." global=#true env=UNIMATION_DEVICE {
+flag --device help="Provider device identifier: Apple UDID, Android IP:port, or usb:VID:PID." global=#true env=UNIMATION_DEVICE {
     arg <DEVICE>
 }
 flag --device-set help="Existing simulator device set, required for apple-simulator." global=#true env=UNIMATION_DEVICE_SET {
     arg <DEVICE_SET>
 }
+flag --credentials help="Explicit Android credential directory, or PEM key for USB." global=#true env=UNIMATION_CREDENTIALS {
+    arg <CREDENTIALS>
+}
+flag --trust-first-connection help="Record the first wireless public key; subsequent key changes fail." global=#true
 flag --format help="Output format. Text is plain and identical in terminals and pipes." global=#true default=text {
     arg <FORMAT> {
         choices {
@@ -31,6 +36,30 @@ flag --json help="Emit full JSON; sessions emit one JSON response per line." glo
 flag "-h --help" help="Print help" action=help builtin=#true
 flag "-V --version" help="Print version" action=version builtin=#true
 complete device_set type=dir
+complete credentials type=path
+cmd android help="Android connection setup; device automation uses shared commands." subcommand_required=#true {
+    flag "-h --help" help="Print help" action=help builtin=#true
+    cmd init-key help="Create a persistent private host key for direct USB/classic TCP." {
+        flag "-h --help" help="Print help" action=help builtin=#true
+        arg <PATH>
+    }
+    cmd pair help="Pair an Android wireless-debugging endpoint; read the code from stdin." {
+        flag "-h --help" help="Print help" action=help builtin=#true
+        arg <ENDPOINT>
+    }
+    cmd pair-qr help="Show a QR code, discover the scanner, and pair without an ADB server." {
+        flag --qr-svg {
+            arg <QR_SVG>
+        }
+        flag --timeout-secs default="120" {
+            arg <TIMEOUT_SECS>
+        }
+        flag "-h --help" help="Print help" action=help builtin=#true
+    }
+    cmd devices help="List USB devices without authorizing or selecting one." {
+        flag "-h --help" help="Print help" action=help builtin=#true
+    }
+}
 cmd completions help="Generate a shell completion script using the command specification." {
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <SHELL> {

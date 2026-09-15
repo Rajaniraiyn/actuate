@@ -14,7 +14,9 @@ serde_json.workspace = true
 usage.workspace = true
 serde.workspace = true
 ios.workspace = true
+android = { path = "../android", optional = true }
 
 [features]
-default = ["idevice"]
+default = ["idevice", "android"]
 idevice = ["ios/physical"]
+android = ["dep:android"]
