@@ -19,7 +19,7 @@ macOS requires an installed Apple SDK and linker. If the default Xcode selection
 
 ## Embedding
 
-`unimation-core` has independent `Observe`, `SemanticActions`, `PointerInput`, `TextInput`, and `Discover` traits. `Capture`, `KeyboardInput`, `WindowControl`, and `Subscribe` define extension points. `unimation-macos` exposes `Accessibility` and `QuartzInput` through modern `objc2` framework bindings. It has no Swift runtime or helper dependency. Other platform crates are reserved for implementation.
+`unimation-core` has independent `Observe`, `SemanticActions`, `PointerInput`, `TextInput`, and `Discover` traits. `Capture`, `KeyboardInput`, `WindowControl`, and `Subscribe` define extension points. `unimation-macos` exposes `Accessibility`, `QuartzInput`, `SkyLightInput`, native screenshot capture, and `MacSession` through modern `objc2` framework bindings. It has no Swift runtime or helper dependency. Other platform crates are reserved for implementation.
 
 ## Agent sessions
 
@@ -34,7 +34,17 @@ macOS requires an installed Apple SDK and linker. If the default Xcode selection
 {"op":"text","delivery":{"kind":"process","pid":1234},"text":"hello"}
 ```
 
-Use returned references, never guessed IDs. Input requires an explicit `global` or `process` delivery route. Points currently use Quartz desktop coordinates. No capture-coordinate conversion is implemented yet. Unicode text packets are distinct from physical keys and IME composition. A `dispatched` receipt does not prove that an app consumed an event.
+Use returned references, never guessed IDs. Input requires an explicit route. Reference clicks support `semantic`, `global`, `process`, and `skylight` modes. Raw pointer events use Quartz desktop logical points; `click_window` uses window-local logical points and `click_image` uses pixels from a retained capture. Capture mappings preserve display origins and image scaling. Unicode text packets are distinct from physical keys and IME composition. A `dispatched` receipt does not prove that an app consumed an event.
+
+## Observation and screenshots
+
+Sessions retain the latest 32 snapshots and 32 captures. `query` filters a retained snapshot without removing native attributes from returned nodes. `diff` compares increasing revisions of the same root and reports field changes, new observations, scope removals and uncertain absence separately. Querying and diffing do not refresh the UI; observe again after an action.
+
+Native ScreenCaptureKit screenshots are the default on macOS 14+. Request `backend: "executable"` to use the separate `screencapture` provider; there is no implicit fallback. Native capture supports `max_pixel_edge` downscaling. Image clicks reject changed geometry and frames predating a session input dispatch. These checks cannot detect every external UI change.
+
+The optional [Rust cursor overlay](crates/unimation-overlay/README.md) runs as a separate visual process. It draws a synthetic cursor and never injects input. Start it through `cursor_overlay` with an explicit executable path to visualize subsequent SkyLight pointer dispatches. It starts hidden. `cursor_state` reports dispatch state and visual errors; neither is proof of application consumption or completed rendering.
+
+Reference pointer clicks use the AX bounds center as a heuristic. Bounds can include blank space, such as the area beside a checkbox label. Observe actual acceptance, or use an explicit verified coordinate or advertised semantic action.
 
 ## Current limits
 
@@ -53,6 +63,8 @@ mkdir -p native/macos/.build
 xcrun swiftc native/macos/fixture.swift -o native/macos/.build/fixture -framework AppKit
 open -a Calculator
 python3 tests/macos_e2e.py
+python3 tests/skylight_e2e.py
+python3 tests/extended_macos_e2e.py
 ```
 
-The native test changes Calculator's expression, briefly opens a disposable fixture, and moves the pointer. It exercises semantic setters, Unicode input, and pointer delivery. It reports known process-directed pointer limitations separately from successful global-route tests. See [observed results](docs/validation.md) and the [session protocol](docs/session.md).
+The native test changes Calculator's expression, briefly opens a disposable fixture, and moves the pointer. It exercises semantic setters, Unicode input, and pointer delivery. It reports known process-directed pointer limitations separately from successful global-route tests. `tests/skylight_e2e.py` exercises the separate private window-targeted provider. See [observed results](docs/validation.md) and the [session protocol](docs/session.md).

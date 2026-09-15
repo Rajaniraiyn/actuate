@@ -8,6 +8,7 @@ cmd discover help="List running applications and accessibility permission state.
     flag "-h --help" help="Print help" action=help builtin=#true
 }
 cmd observe help="Read the native accessibility tree for an application." {
+    alias snapshot
     flag --max-nodes default="1000" {
         arg <MAX_NODES>
     }
@@ -16,6 +17,50 @@ cmd observe help="Read the native accessibility tree for an application." {
     }
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <PID>
+}
+cmd capture help="Capture the main display or an explicitly selected display/window." {
+    flag --display {
+        arg <DISPLAY>
+    }
+    flag --window {
+        arg <WINDOW>
+    }
+    flag --backend default=native {
+        arg <BACKEND>
+    }
+    flag --max-pixel-edge {
+        arg <MAX_PIXEL_EDGE>
+    }
+    flag "-h --help" help="Print help" action=help builtin=#true
+    arg <PATH>
+}
+cmd displays help="List native display geometry." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd windows help="List native window IDs, owners and geometry." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd capabilities help="Report delivery routes and availability." {
+    flag "-h --help" help="Print help" action=help builtin=#true
+}
+cmd diff help="Compare two snapshots saved from the same live session." {
+    flag --modified-only
+    flag "-h --help" help="Print help" action=help builtin=#true
+    arg <BEFORE>
+    arg <AFTER>
+}
+cmd query help="Query a saved snapshot without discarding fields from matching nodes." {
+    flag --role {
+        arg <ROLE>
+    }
+    flag --name {
+        arg <NAME>
+    }
+    flag --action {
+        arg <ACTION>
+    }
+    flag "-h --help" help="Print help" action=help builtin=#true
+    arg <SNAPSHOT>
 }
 cmd spec help="Export the portable Usage command specification." {
     flag "-h --help" help="Print help" action=help builtin=#true

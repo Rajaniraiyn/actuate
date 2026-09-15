@@ -9,9 +9,30 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 objc2 = "0.6.4"
 objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "AXUIElement", "AXValue", "AXError", "HIServices", "libc"] }
 objc2-core-foundation = "0.3.2"
-objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGEventSource", "CGRemoteOperation", "libc"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGEventSource", "CGRemoteOperation", "CGDirectDisplay", "CGWindow", "CGGeometry", "CGError", "libc"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "libc"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString", "NSUUID"] }
+
+[features]
+default = ["native-capture"]
+native-capture = ["dep:objc2-screen-capture-kit", "dep:objc2-image-io", "dep:block2"]
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-screen-capture-kit]
+version = "0.3.2"
+optional = true
+default-features = false
+features = ["std", "SCScreenshotManager", "SCShareableContent", "SCStream", "block2", "objc2-core-foundation", "objc2-core-graphics"]
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-image-io]
+version = "0.3.2"
+optional = true
+default-features = false
+features = ["std", "CGImageDestination", "objc2-core-graphics"]
+
+[target.'cfg(target_os = "macos")'.dependencies.block2]
+version = "0.6.2"
+optional = true

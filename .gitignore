@@ -2,3 +2,4 @@
 /native/macos/.build/
 *.swp
 .DS_Store
+__pycache__/

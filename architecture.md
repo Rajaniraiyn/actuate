@@ -1,8 +1,8 @@
 # Unimation architecture
 
-Implementation status, 2026-09-15: the first Cargo workspace now uses direct Rust `objc2` macOS providers, with independently selectable AX and Quartz components. A Swift helper is not required. The CLI uses `jdx/usage`. See [README](README.md), [backend tasks](docs/backends.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
+Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. See [README](README.md), [backend tasks](docs/backends.md), [SkyLight details](docs/skylight.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
 
-Status: working design, 2026-09-15. This repository contains a design, not an implemented or validated automation runtime. Command names and Rust contracts below are proposals. Platform mechanisms have been researched through source code and documentation; their presence does not establish Unimation support.
+Status: working design. Command names and Rust contracts below describe the target architecture unless identified as implemented in the linked implementation documentation. Research evidence alone does not establish runtime support.
 
 Reading guide: [target and reference model](#3-target-model-trees-plus-relationships), [windows and transient UI](#6-windows-popups-and-modal-interaction), [execution behavior](#9-operation-contract), [Rust composition](#14-rust-composition-and-provider-lifecycle), [conformance](#18-conformance-and-compatibility-testing), and [research evidence](#20-research-evidence).
 

@@ -35,7 +35,7 @@ def test_protocol(s):
     reply = s.call(op='discover', id='correlation-check')
     assert reply['id'] == 'correlation-check'
     assert reply['result']['accessibility_trusted'], 'Accessibility access is required'
-    reply = s.call(op='pointer', delivery={'kind':'global'}, action={'kind':'click','point':{'x':0,'y':0},'button':'right'}, id=2)
+    reply = s.call(op='pointer', delivery={'kind':'global'}, action={'kind':'click','point':{'x':0,'y':0},'button':'unsupported_button'}, id=2)
     assert reply['error']['code'] == 'invalid_request' and reply['id'] == 2, reply
     reply = s.call(op='discover', unexpected=True)
     assert reply['error']['code'] == 'invalid_request', reply
@@ -115,6 +115,12 @@ def test_fixture(s):
         except AssertionError:
             print('KNOWN LIMIT: process-directed Quartz click dispatched but not consumed')
         # This is a separate explicit global-route test after observing the result.
+        # Global delivery requires the fixture to be explicitly foreground.
+        s.result(op='semantic',target=tree['root'],action={'kind':'set_bool','attribute':'AXFrontmost','value':True})
+        deadline=time.monotonic()+3
+        while s.result(op='discover').get('active_pid') != fixture.pid:
+            if time.monotonic()>deadline: raise AssertionError('Fixture did not activate for global input')
+            time.sleep(.05)
         s.result(op='semantic',target=target,action={'kind':'set_string','attribute':'AXValue','value':'reset'})
         s.result(op='pointer',delivery={'kind':'global'},action={'kind':'click','point':center(button)})
         await_value('clicked')

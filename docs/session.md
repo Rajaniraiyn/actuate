@@ -2,7 +2,7 @@
 
 Run `unimation session`. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
 
-The authoritative request types are `unimation_core::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
+The authoritative request types are `unimation_core::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `unimation_macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
 
 | Operation | Fields | Result |
 | --- | --- | --- |
@@ -14,6 +14,23 @@ The authoritative request types are `unimation_core::SessionRequest`, `SemanticA
 | `semantic` | `target`, `action` | Dispatch receipt |
 | `pointer` | `delivery`, `action` | Dispatch receipt |
 | `text` | `delivery`, `text` | Dispatch receipt |
+| `key` | `delivery`, `chord: {key_code, modifiers?}` | Native virtual-key receipt |
+| `parameterized_attribute` | `target`, `name`, `parameter` | Native parameterized value |
+| `wait_attribute` | `target`, `name`, raw `expected`, optional `timeout_ms` | Poll a native value with a deadline |
+| `snapshots` | None | Retained revision/root/coverage metadata |
+| `query` | `query`, optional `revision` | Full matching and indeterminate nodes |
+| `diff` | `before`, optional `after` | Observation differences |
+| `hit_test` | Desktop `point` | Live AX reference |
+| `window` | `target` | Native window and geometry |
+| `click` | `target`, `mode`, optional `button`, `count`, `modifiers` | Explicit reference activation/input |
+| `displays`, `windows`, `capabilities` | None | Native discovery/provider metadata |
+| `capture` | `source`, `path`, optional `backend`, `max_pixel_edge` | Frame ID, file and coordinate mapping |
+| `click_image` | `frame`, pixel `point`, `mode`, optional `button`, `count` | Input using a retained frame |
+| `click_window` | `target`, window-local `point`, `mode`, optional `button`, `count` | Input using live window geometry |
+| `scroll_target` | `target`, `mode`, `vertical`, `horizontal` | Scroll at a reference's center |
+| `skylight_pointer` | `target`, `action` | Window-targeted native pointer sequence |
+| `cursor_overlay` | `action: {kind: start, executable}` or `{kind: stop}` | Optional helper lifecycle, no render acknowledgement |
+| `cursor_state` | None | Last SkyLight dispatch and visual-helper status |
 
 Semantic action shapes:
 
@@ -31,8 +48,51 @@ Pointer action shapes:
 {"kind":"scroll","vertical":20,"horizontal":0}
 ```
 
-Click currently means one left-button down/up pair. Scroll currently uses pixel deltas at the current pointer location. Delivery is `{"kind":"global"}` or `{"kind":"process","pid":1234}`. A process route does not select a window or focused control inside that process.
+Click defaults to one left-button down/up pair; `button` also accepts `right` and `middle`, and `count` supports 1 through 3. `modifiers` has optional `shift`, `control`, `alt`, and `meta` booleans. Scroll uses pixel deltas with an optional desktop `point`; omission uses the current pointer position. Drag accepts `from`, `to`, optional `button`, `modifiers`, and `duration_ms`. Delivery is `{"kind":"global"}` or `{"kind":"process","pid":1234}`. A process route does not select a window or focused control inside that process.
 
 AX may advertise optional attributes that have no value. Their native `no_value` or `attribute_unsupported` results remain in the response without making the snapshot incomplete by themselves. Other failed reads, failed enumeration, and traversal limits set `complete:false`. `traversal_complete` separately reports whether the requested AXChildren traversal finished; attribute errors can coexist with complete traversal. Node-budget truncation includes `issues` with a pending-node count; depth truncation is recorded on its node. Completeness never means all UI appeared atomically or that hidden/provider-omitted content was discovered.
 
 The implementation does not silently normalize native text, infer an action from a role, activate a target, or retry a mutation. An `unknown` effect means the caller must inspect the resulting state before deciding whether retry is safe. Route-specific native attribute names are intentional backend extensions.
+
+## Snapshot queries and differences
+
+```json
+{"op":"query","query":{"role":{"kind":"exact","value":"AXButton"},"name":{"kind":"contains","value":"Equal"}}}
+{"op":"query","revision":2,"query":{"attributes":{"AXEnabled":{"type":"bool","value":true}},"action":"AXPress"}}
+{"op":"diff","before":1,"after":2}
+```
+
+Revision omission selects the latest retained observation. The session retains 32 snapshots. Different roots or sessions, duplicate references and non-increasing revisions are rejected by diff. `newly_observed` does not imply creation. `removed_from_scope` requires complete traversal and never implies destruction; incomplete absence appears as `no_longer_observed`. Modified fields preserve before/after values and presence flags, so native null remains different from an unobserved attribute. Read errors and opaque handle changes have uncertain evidence.
+
+Role matches native `AXRole`. Name checks `AXTitle`, `AXDescription` and `AXLabel`; it does not invent one canonical name. Native attribute predicates compare full JSON values including type tags. Filters are combined with AND. Returned nodes keep all attributes, actions and issues. `indeterminate` preserves nodes whose requested predicate could not be established. Query and diff operate on saved observations and never refresh them implicitly.
+
+## Screenshots and coordinate routing
+
+```json
+{"op":"capture","source":{"kind":"display","display_id":1},"path":"/tmp/unimation-frame.png","max_pixel_edge":1600}
+{"op":"capture","source":{"kind":"window","window_id":42},"path":"/tmp/unimation-window.png","backend":"native"}
+{"op":"click_image","frame":1,"point":{"x":300,"y":200},"mode":"global"}
+{"op":"click_window","target":{"session":"SESSION","id":12},"point":{"x":80,"y":100},"mode":"skylight"}
+```
+
+Use discovered IDs and fresh output paths; example IDs are placeholders. Native ScreenCaptureKit is the default backend. `executable` explicitly selects `screencapture` and does not support `max_pixel_edge`. No provider falls back automatically.
+
+A frame records desktop logical bounds, output pixel dimensions, owner when applicable and geometry revision. Pixel mapping accounts for downscaling and negative display origins. Session-owned frame IDs prevent client-supplied transforms. Changed geometry or a subsequent session mutation with dispatched/unknown effect invalidates image clicking. Invalid requests without effects do not invalidate frames. External UI changes can still occur without a geometry change.
+
+Display images support global input. Window images support global, process and SkyLight input. Global window-image clicks additionally require the current AX hit-test window/owner to match the capture. Process mode selects a PID and retains its delivery limitations. SkyLight uses window-local coordinates. Semantic activation requires a reference and has no pixel meaning.
+
+## Optional cursor visualization
+
+```json
+{"op":"cursor_overlay","action":{"kind":"start","executable":"/absolute/path/to/unimation-overlay"}}
+{"op":"cursor_state"}
+{"op":"cursor_overlay","action":{"kind":"stop"}}
+```
+
+The explicit helper path is resolved without a shell or PATH search. Startup leaves the overlay hidden. Subsequent successful SkyLight pointer dispatches queue a visualization at the last dispatched point and show the cursor. Moves animate for 180 ms; clicks move immediately and pulse. Visualization follows input dispatch, rather than delaying input until the animation arrives. It does not mirror the physical pointer or observe application acceptance.
+
+`cursor_state` reports the last dispatched SkyLight pointer and visual-helper errors. Queue success does not acknowledge rendering. A visual failure never converts successful input into a retryable operation error. Inspect visual status separately and do not repeat input merely because the cursor was not visible. Stop or session teardown ends the helper. The helper also exposes its own [visual-only protocol](../crates/unimation-overlay/README.md).
+
+Reference pointer clicks use an AX bounds center as a convenience heuristic. Bounds can span noninteractive space, including blank regions beside checkbox controls. A delivered center click may do nothing. Verify acceptance with a fresh observation, or select an explicit coordinate or an advertised semantic action appropriate to the task.
+
+Reference pointer routes check the owning window's advertised `AXSheets` and direct `AXChildren` for attached sheets. An underlying reference returns `blocked_by_modal` before dispatch. Global image clicks also check the element hit at the mapped point. This is not a complete modal-window graph: separate app-modal windows, unadvertised overlays and raw coordinate/PID delivery still require caller observation and routing.

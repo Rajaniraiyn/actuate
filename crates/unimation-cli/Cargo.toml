@@ -11,3 +11,4 @@ unimation-core.workspace = true
 unimation-macos.workspace = true
 serde_json.workspace = true
 usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics"] }
+serde.workspace = true

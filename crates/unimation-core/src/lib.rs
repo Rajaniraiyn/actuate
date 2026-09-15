@@ -1,9 +1,14 @@
-//! Independent provider capabilities. Native handles never cross this boundary.
+pub mod actions;
+pub mod diff;
+pub mod geometry;
+pub mod query;
+pub use actions::*;
+// Independent provider capabilities. Native handles never cross this boundary.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElementRef {
     pub session: String,
@@ -65,9 +70,39 @@ pub struct ObserveRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SemanticAction {
-    Perform { name: String },
-    SetString { attribute: String, value: String },
-    SetBool { attribute: String, value: bool },
+    Perform {
+        name: String,
+    },
+    SetString {
+        attribute: String,
+        value: String,
+    },
+    SetBool {
+        attribute: String,
+        value: bool,
+    },
+    SetInteger {
+        attribute: String,
+        value: i64,
+    },
+    SetFloat {
+        attribute: String,
+        value: f64,
+    },
+    SetRange {
+        attribute: String,
+        location: i64,
+        length: i64,
+    },
+    SetPoint {
+        attribute: String,
+        value: Point,
+    },
+    SetSize {
+        attribute: String,
+        width: f64,
+        height: f64,
+    },
 }
 /// Global input may affect foreground focus. Process input is delivery, not proof
 /// that a control consumed an event. Neither route silently falls back.
@@ -86,9 +121,34 @@ pub struct Point {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PointerAction {
-    Move { point: Point },
-    Click { point: Point },
-    Scroll { vertical: i32, horizontal: i32 },
+    Move {
+        point: Point,
+    },
+    Click {
+        point: Point,
+        #[serde(default)]
+        button: MouseButton,
+        #[serde(default = "one_click")]
+        count: u8,
+        #[serde(default)]
+        modifiers: Modifiers,
+    },
+    Scroll {
+        vertical: i32,
+        horizontal: i32,
+        #[serde(default)]
+        point: Option<Point>,
+    },
+    Drag {
+        from: Point,
+        to: Point,
+        #[serde(default)]
+        button: MouseButton,
+        #[serde(default)]
+        modifiers: Modifiers,
+        #[serde(default = "default_drag_duration")]
+        duration_ms: u64,
+    },
 }
 pub trait Discover {
     fn discover(&mut self) -> Result<Value>;
@@ -175,9 +235,56 @@ pub enum SessionRequest {
         #[serde(default = "default_max_depth")]
         max_depth: usize,
     },
+    ParameterizedAttribute {
+        target: ElementRef,
+        name: String,
+        parameter: AttributeParameter,
+    },
+    WaitAttribute {
+        target: ElementRef,
+        name: String,
+        expected: Value,
+        #[serde(default = "default_wait_timeout")]
+        timeout_ms: u64,
+    },
+    Diff {
+        before: u64,
+        #[serde(default)]
+        after: Option<u64>,
+    },
+    Query {
+        #[serde(default)]
+        revision: Option<u64>,
+        query: query::NodeQuery,
+    },
+    Snapshots {},
+    Key {
+        delivery: Delivery,
+        chord: KeyChord,
+    },
+    HitTest {
+        point: Point,
+    },
+    Window {
+        target: ElementRef,
+    },
+    Click {
+        target: ElementRef,
+        mode: ClickMode,
+        #[serde(default)]
+        button: MouseButton,
+        #[serde(default = "one_click")]
+        count: u8,
+        #[serde(default)]
+        modifiers: Modifiers,
+    },
     Inspect {
         target: ElementRef,
     },
+}
+
+pub const fn default_wait_timeout() -> u64 {
+    5000
 }
 
 #[cfg(test)]
@@ -189,7 +296,7 @@ mod tests {
     fn rejects_unrepresentable_action_fields_before_dispatch() {
         for payload in [
             json!({"op":"pointer", "delivery":{"kind":"global", "pid":123}, "action":{"kind":"click", "point":{"x":0,"y":0}}}),
-            json!({"op":"pointer", "delivery":{"kind":"global"}, "action":{"kind":"click", "button":"right", "point":{"x":0,"y":0}}}),
+            json!({"op":"pointer", "delivery":{"kind":"global"}, "action":{"kind":"click", "button":"unsupported_button", "point":{"x":0,"y":0}}}),
             json!({"op":"discover", "unexpected":true}),
             json!({"op":"text", "delivery":{"kind":"process","pid":123}, "text":"x", "paste":true}),
         ] {

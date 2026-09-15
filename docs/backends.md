@@ -6,19 +6,23 @@ Native handles remain provider-owned. Reference namespaces change when a provide
 
 ## macOS
 
-The initial provider links directly through the `objc2` framework crates. It requires no Swift helper or IPC. AX handles are retained inside a thread-bound `Accessibility` instance. `QuartzInput` is separate. Process-directed Quartz events are not SkyLight events and do not establish focus preservation or event consumption.
+The initial provider links directly through the `objc2` framework crates. It requires no Swift helper or IPC. AX handles are retained inside a thread-bound `Accessibility` instance. `QuartzInput`, `SkyLightInput` and both capture providers are separate. `MacSession` composes them and maintains snapshot/frame history. Process-directed Quartz events are not SkyLight events and do not establish focus preservation or event consumption.
 
 The Swift source under `native/macos` is a disposable test app only. It is not linked, launched, or required by the library or CLI.
 
+Implemented extensions include role/name/native-attribute queries, field-level observation diffs, parameterized attribute reads, bounded attribute polling, physical key chords, pointer buttons/counts/modifiers/drag, native window lookup and hit-testing. The default capture route uses ScreenCaptureKit still screenshots on macOS 14+; the executable route is explicit. Frame mappings include native bounds, output pixel dimensions and a geometry fingerprint. SkyLight uses dynamically loaded symbols and window-local packets. See [its contract and limits](skylight.md).
+
+The optional `unimation-overlay` executable owns its AppKit run loop and renders a separate cursor. `MacSession` can start it from an explicit path and queue the last successful SkyLight pointer position after dispatch. It remains optional; queue and render status are separate from input receipts. See [cursor research](reference-cursor-notes.md) for upstream patterns and their limitations.
+
 Next work:
 
-- AX observer ownership and run-loop integration, destruction events, reference retirement, diff coverage.
-- Typed native values, complete CF container/attributed-string/text-marker serialization, parameterized attribute queries and typed set operations.
-- ScreenCaptureKit capture and display/window coordinate transforms with mapping revisions.
-- Keyboard chords and owned gesture leases, cancellation cleanup and scoped execution receipts.
-- SkyLight symbol discovery, authenticated targeted packets and window-local coordinates as an independent input provider.
-- Native window identity, modal/owner relationships, Spaces and focus effects.
-- Optional process isolation around the same traits when callers need crash containment.
+- AX observer ownership, destruction events, reference retirement and bounded native-handle retention.
+- Complete native container/attributed-string/text-marker serialization and more parameter/set types.
+- Streaming ScreenCaptureKit subscriptions and display-change lifecycle handling.
+- Owned gesture leases, cancellation cleanup across provider failures and scoped execution verification.
+- Validated SkyLight keyboard authentication and explicit focus-without-raise capabilities.
+- Modal/owner relationships, Spaces, stronger window incarnation identity and focus-effect reporting.
+- Optional worker isolation for hung/crashing native calls, and richer cursor lifecycle/arrival reporting.
 
 ## Windows
 

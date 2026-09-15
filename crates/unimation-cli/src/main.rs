@@ -11,12 +11,48 @@ enum Command {
     /// List running applications and accessibility permission state.
     Discover,
     /// Read the native accessibility tree for an application.
+    #[usage(visible_alias = "snapshot")]
     Observe {
         pid: i32,
         #[usage(long, default = "1000")]
         max_nodes: usize,
         #[usage(long, default = "30")]
         max_depth: usize,
+    },
+    /// Capture the main display or an explicitly selected display/window.
+    Capture {
+        path: std::path::PathBuf,
+        #[usage(long)]
+        display: Option<u32>,
+        #[usage(long)]
+        window: Option<u32>,
+        #[usage(long, default = "native")]
+        backend: String,
+        #[usage(long)]
+        max_pixel_edge: Option<u32>,
+    },
+    /// List native display geometry.
+    Displays,
+    /// List native window IDs, owners and geometry.
+    Windows,
+    /// Report delivery routes and availability.
+    Capabilities,
+    /// Compare two snapshots saved from the same live session.
+    Diff {
+        before: std::path::PathBuf,
+        after: std::path::PathBuf,
+        #[usage(long)]
+        modified_only: bool,
+    },
+    /// Query a saved snapshot without discarding fields from matching nodes.
+    Query {
+        snapshot: std::path::PathBuf,
+        #[usage(long)]
+        role: Option<String>,
+        #[usage(long)]
+        name: Option<String>,
+        #[usage(long)]
+        action: Option<String>,
     },
     /// Export the portable Usage command specification.
     Spec,
@@ -35,7 +71,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print!("{}", App::to_kdl());
         return Ok(());
     }
-    run(app.command)
+    match app.command {
+        Command::Diff {
+            before,
+            after,
+            modified_only,
+        } => {
+            let before: unimation_core::Snapshot =
+                serde_json::from_reader(std::fs::File::open(before)?)?;
+            let after: unimation_core::Snapshot =
+                serde_json::from_reader(std::fs::File::open(after)?)?;
+            let diff = unimation_core::diff::diff_snapshots(&before, &after)?;
+            let value = if modified_only {
+                serde_json::json!({"before_revision":diff.before_revision,"after_revision":diff.after_revision,"modified":diff.modified,"before_coverage":diff.before_coverage,"after_coverage":diff.after_coverage})
+            } else {
+                serde_json::to_value(diff)?
+            };
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            Ok(())
+        }
+        Command::Query {
+            snapshot,
+            role,
+            name,
+            action,
+        } => {
+            let snapshot: unimation_core::Snapshot =
+                serde_json::from_reader(std::fs::File::open(snapshot)?)?;
+            let query = unimation_core::query::NodeQuery {
+                role: role.map(|value| unimation_core::query::TextMatch::Exact { value }),
+                name: name.map(|value| unimation_core::query::TextMatch::Contains { value }),
+                action,
+                ..Default::default()
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&unimation_core::query::query_nodes(
+                    &snapshot, &query
+                ))?
+            );
+            Ok(())
+        }
+        command => run(command),
+    }
 }
 #[cfg(not(target_os = "macos"))]
 fn run(_: Command) -> Result<(), Box<dyn std::error::Error>> {
@@ -56,60 +134,74 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             max_nodes,
             max_depth,
         })?)?,
-        Command::Session => {
-            return session(&mut ax);
+        Command::Capture {
+            path,
+            display,
+            window,
+            backend,
+            max_pixel_edge,
+        } => {
+            if display.is_some() && window.is_some() {
+                return Err("Choose either --display or --window".into());
+            }
+            let source = match window {
+                Some(window_id) => unimation_macos::capture::CaptureSource::Window { window_id },
+                None => unimation_macos::capture::CaptureSource::Display {
+                    display_id: display.unwrap_or_else(unimation_macos::capture::main_display_id),
+                },
+            };
+            unimation_macos::session::MacSession::new().extension(
+                unimation_macos::session::MacRequest::Capture {
+                    source,
+                    path,
+                    backend: match backend.as_str() {
+                        "native" => unimation_macos::session::CaptureBackend::Native,
+                        "executable" => unimation_macos::session::CaptureBackend::Executable,
+                        _ => return Err("--backend must be native or executable".into()),
+                    },
+                    max_pixel_edge,
+                },
+            )?
         }
-        Command::Spec | Command::Protocol => unreachable!(),
+        Command::Displays => unimation_macos::session::MacSession::new()
+            .extension(unimation_macos::session::MacRequest::Displays {})?,
+        Command::Windows => unimation_macos::session::MacSession::new()
+            .extension(unimation_macos::session::MacRequest::Windows {})?,
+        Command::Capabilities => unimation_macos::session::MacSession::new()
+            .extension(unimation_macos::session::MacRequest::Capabilities {})?,
+        Command::Session => {
+            return session();
+        }
+        Command::Spec | Command::Protocol | Command::Diff { .. } | Command::Query { .. } => {
+            unreachable!()
+        }
     };
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 #[cfg(target_os = "macos")]
-fn session(ax: &mut unimation_macos::Accessibility) -> Result<(), Box<dyn std::error::Error>> {
+fn session() -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Value, json};
     use std::io::{BufRead, Write};
-    use unimation_core::*;
-    let mut input = unimation_macos::QuartzInput;
+    let mut runtime = unimation_macos::session::MacSession::new();
     for line in std::io::stdin().lock().lines() {
         let line = line?;
-        let reply = (|| -> std::result::Result<Value, Box<dyn std::error::Error>> {
-            let mut request: Value = serde_json::from_str(&line)?;
-            if let Some(object) = request.as_object_mut() {
-                object.remove("id");
-            }
-            let request: SessionRequest = serde_json::from_value(request)?;
-            let result: Result<Value> = match request {
-                SessionRequest::Discover {} => ax.discover(),
-                SessionRequest::Observe { request } => ax.observe(request).map(|r| json!(r)),
-                SessionRequest::Semantic { target, action } => {
-                    ax.semantic(&target, action).map(|r| json!(r))
-                }
-                SessionRequest::Pointer { delivery, action } => {
-                    input.pointer(delivery, action).map(|r| json!(r))
-                }
-                SessionRequest::Text { delivery, text } => {
-                    input.type_text(delivery, &text).map(|r| json!(r))
-                }
-                SessionRequest::Attribute { target, name } => ax.read_attribute(&target, &name),
-                SessionRequest::ObserveSubtree {
-                    target,
-                    max_nodes,
-                    max_depth,
-                } => ax
-                    .observe_subtree(&target, max_nodes, max_depth)
-                    .map(|r| json!(r)),
-                SessionRequest::Inspect { target } => ax.inspect(&target),
-            };
-            Ok(match result {
-                Ok(r) => json!({"result":r}),
-                Err(e) => json!({"error":e}),
-            })
-        })();
-        let mut reply = reply.unwrap_or_else(|e| json!({"error":{"code":"invalid_request", "message":e.to_string(), "effect":"none"}}));
-        if let Ok(Value::Object(request)) = serde_json::from_str::<Value>(&line)
-            && let Some(id) = request.get("id")
-        {
-            reply["id"] = id.clone();
+        let request = serde_json::from_str::<Value>(&line);
+        let id = request.as_ref().ok().and_then(|v| v.get("id")).cloned();
+        let result = match request {
+            Ok(r) => runtime.dispatch(r),
+            Err(e) => Err(unimation_core::NativeError {
+                code: "invalid_request".into(),
+                message: e.to_string(),
+                effect: unimation_core::Effect::None,
+            }),
+        };
+        let mut reply = match result {
+            Ok(v) => json!({"result":v}),
+            Err(e) => json!({"error":e}),
+        };
+        if let Some(id) = id {
+            reply["id"] = id;
         }
         println!("{}", serde_json::to_string(&reply)?);
         std::io::stdout().flush()?;

@@ -1,5 +1,4 @@
 use crate::error;
-use objc2_app_kit::NSWorkspace;
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
     CFArray, CFBoolean, CFNumber, CFRange, CFRetained, CFString, CFType, CGPoint, CGRect, CGSize,
@@ -8,7 +7,7 @@ use objc2_core_foundation::{
 use objc2_foundation::NSUUID;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     marker::PhantomData,
     ptr::{self, NonNull},
     rc::Rc,
@@ -20,6 +19,7 @@ use unimation_core::*;
 pub struct Accessibility {
     session: String,
     elements: Vec<CFRetained<AXUIElement>>,
+    element_index: HashMap<CFRetained<AXUIElement>, usize>,
     opaque: Vec<CFRetained<CFType>>,
     revision: u64,
     _thread_bound: PhantomData<Rc<()>>,
@@ -52,7 +52,7 @@ fn check(status: AXError, context: &str, mutation: bool) -> Result<()> {
         ))
     }
 }
-fn attribute(element: &AXUIElement, name: &str) -> Result<CFRetained<CFType>> {
+pub(crate) fn attribute(element: &AXUIElement, name: &str) -> Result<CFRetained<CFType>> {
     let mut raw = ptr::null();
     // SAFETY: valid retained element/string and initialized out pointer. Copy returns +1 ownership.
     unsafe {
@@ -67,7 +67,7 @@ fn attribute(element: &AXUIElement, name: &str) -> Result<CFRetained<CFType>> {
     }
 }
 // AX arrays contain retained CF objects according to the native AX contract.
-fn cf_items(array: &CFArray) -> Vec<CFRetained<CFType>> {
+pub(crate) fn cf_items(array: &CFArray) -> Vec<CFRetained<CFType>> {
     // SAFETY: only called for arrays returned as AX attribute values or name lists.
     unsafe { array.cast_unchecked::<CFType>().to_vec() }
 }
@@ -107,6 +107,7 @@ impl Accessibility {
         Self {
             session: NSUUID::UUID().UUIDString().to_string(),
             elements: vec![],
+            element_index: HashMap::new(),
             opaque: vec![],
             revision: 0,
             _thread_bound: PhantomData,
@@ -116,21 +117,22 @@ impl Accessibility {
         // SAFETY: permission query has no arguments and does not prompt.
         unsafe { AXIsProcessTrusted() }
     }
-    fn intern(&mut self, element: &AXUIElement) -> ElementRef {
-        let index = self
-            .elements
-            .iter()
-            .position(|known| **known == *element)
-            .unwrap_or_else(|| {
+    pub(crate) fn intern(&mut self, element: &AXUIElement) -> ElementRef {
+        let index = match self.element_index.get(element) {
+            Some(index) => *index,
+            None => {
+                let index = self.elements.len();
                 self.elements.push(element.retain());
-                self.elements.len() - 1
-            });
+                self.element_index.insert(element.retain(), index);
+                index
+            }
+        };
         ElementRef {
             session: self.session.clone(),
             id: index as u64 + 1,
         }
     }
-    fn resolve(&self, target: &ElementRef) -> Result<CFRetained<AXUIElement>> {
+    pub(crate) fn resolve(&self, target: &ElementRef) -> Result<CFRetained<AXUIElement>> {
         if target.session != self.session {
             return Err(error(
                 "stale_reference",
@@ -251,6 +253,81 @@ impl Accessibility {
             "actions":names(&element, true, false)?,
             "parameterized_attributes":names(&element, false, true)?}))
     }
+    pub fn read_parameterized(
+        &mut self,
+        target: &ElementRef,
+        name: &str,
+        parameter: AttributeParameter,
+    ) -> Result<Value> {
+        let element = self.resolve(target)?;
+        macro_rules! erase {
+            ($value:expr) => {{
+                let owned = $value;
+                let value: &CFType = &owned;
+                value.retain()
+            }};
+        }
+        let parameter = match parameter {
+            AttributeParameter::String { value } => erase!(CFString::from_str(&value)),
+            AttributeParameter::Integer { value } => erase!(CFNumber::new_i64(value)),
+            AttributeParameter::Range { location, length } => {
+                if location < 0 || length < 0 || location.checked_add(length).is_none() {
+                    return Err(error(
+                        "invalid_request",
+                        "Invalid UTF-16 range",
+                        Effect::None,
+                    ));
+                }
+                let range = CFRange::new(location as isize, length as isize);
+                // SAFETY: type and native storage match and remain alive during copy.
+                erase!(
+                    unsafe { AXValue::new(AXValueType::CFRange, NonNull::from(&range).cast()) }
+                        .ok_or_else(|| error(
+                            "native_value",
+                            "Cannot create range",
+                            Effect::None
+                        ))?
+                )
+            }
+            AttributeParameter::Point { value } => {
+                if !value.x.is_finite() || !value.y.is_finite() {
+                    return Err(error(
+                        "invalid_request",
+                        "Finite point required",
+                        Effect::None,
+                    ));
+                }
+                let point = CGPoint::new(value.x, value.y);
+                // SAFETY: type and native storage match and remain alive during copy.
+                erase!(
+                    unsafe { AXValue::new(AXValueType::CGPoint, NonNull::from(&point).cast()) }
+                        .ok_or_else(|| error(
+                            "native_value",
+                            "Cannot create point",
+                            Effect::None
+                        ))?
+                )
+            }
+        };
+        let mut raw = ptr::null();
+        // SAFETY: owned arguments and valid out pointer; Copy returns +1 ownership.
+        let value = unsafe {
+            check(
+                element.copy_parameterized_attribute_value(
+                    &CFString::from_str(name),
+                    &parameter,
+                    NonNull::from(&mut raw),
+                ),
+                name,
+                false,
+            )?;
+            CFRetained::from_raw(
+                NonNull::new(raw.cast_mut())
+                    .ok_or_else(|| error("native_null", name, Effect::None))?,
+            )
+        };
+        Ok(self.encode(&value, 0))
+    }
     /// Query attributes omitted by traversal, retaining backend-specific names and values.
     pub fn read_attribute(&mut self, target: &ElementRef, name: &str) -> Result<Value> {
         let element = self.resolve(target)?;
@@ -260,12 +337,41 @@ impl Accessibility {
 }
 impl Discover for Accessibility {
     fn discover(&mut self) -> Result<Value> {
-        let apps = NSWorkspace::sharedWorkspace().runningApplications();
+        let apps = crate::discovery::applications()?;
+        let active_pid = crate::discovery::frontmost_pid();
+        // Query native AXFrontmost per app. AppKit caches isActive until its run
+        // loop runs, which is not guaranteed in a synchronous embedding host.
+        let mut applications = vec![];
+        let mut active_pids = vec![];
+        for app in apps.iter() {
+            let pid = app.processIdentifier();
+            let frontmost = (|| -> Result<bool> {
+                // SAFETY: valid positive native PID; remote status remains fallible.
+                let element = unsafe { AXUIElement::new_application(pid) };
+                unsafe {
+                    check(
+                        element.set_messaging_timeout(0.2),
+                        "Set discovery timeout",
+                        false,
+                    )?;
+                }
+                let value = attribute(&element, "AXFrontmost")?;
+                value
+                    .downcast_ref::<CFBoolean>()
+                    .map(CFBoolean::as_bool)
+                    .ok_or_else(|| error("native_type", "AXFrontmost is not boolean", Effect::None))
+            })();
+            if matches!(frontmost, Ok(true)) {
+                active_pids.push(pid);
+            }
+            applications.push(json!({"pid":pid,"name":app.localizedName().map(|s|s.to_string()),
+                "bundle_id":app.bundleIdentifier().map(|s|s.to_string()),"active":active_pid.map(|front|front==pid), "ax_frontmost":frontmost.as_ref().ok(),
+                "active_error":frontmost.err()}));
+        }
         Ok(
-            json!({"session":self.session, "accessibility_trusted":Self::is_trusted(), "applications":apps.iter().map(|a| json!({
-            "pid":a.processIdentifier(), "name":a.localizedName().map(|s| s.to_string()),
-            "bundle_id":a.bundleIdentifier().map(|s| s.to_string()), "active":a.isActive()
-        })).collect::<Vec<_>>()}),
+            json!({"session":self.session,"accessibility_trusted":Self::is_trusted(),
+            "active_pid":active_pid,"ax_frontmost_pids":active_pids,
+            "active_state_source":"optional_process_manager_probe","application_list_source":"libproc_per_pid_appkit","applications":applications}),
         )
     }
 }
@@ -412,6 +518,7 @@ impl Accessibility {
                 issues,
             });
         }
+        queue.retain(|(element, _)| !seen.contains(&self.intern(element).id));
         if !queue.is_empty() {
             traversal_complete = false;
             complete = false;
@@ -431,59 +538,113 @@ impl Accessibility {
         })
     }
 }
+fn set_value(element: &AXUIElement, attribute: &str, value: &CFType) -> Result<()> {
+    let name = CFString::from_str(attribute);
+    let mut settable = 0;
+    // SAFETY: retained element/value/name and initialized out pointer.
+    unsafe {
+        check(
+            element.is_attribute_settable(&name, NonNull::from(&mut settable)),
+            attribute,
+            false,
+        )?;
+        if settable == 0 {
+            return Err(error(
+                "unsupported",
+                "Attribute is not settable",
+                Effect::None,
+            ));
+        }
+        check(element.set_attribute_value(&name, value), attribute, true)
+    }
+}
 impl SemanticActions for Accessibility {
     fn semantic(&mut self, target: &ElementRef, action: SemanticAction) -> Result<Receipt> {
         let element = self.resolve(target)?;
-        // SAFETY: retained references, valid CFString arguments and initialized Boolean out pointer.
-        unsafe {
-            match action {
-                SemanticAction::Perform { name } => check(
+        match action {
+            // SAFETY: valid retained element and action name; native result determines uncertainty.
+            SemanticAction::Perform { name } => unsafe {
+                check(
                     element.perform_action(&CFString::from_str(&name)),
                     &name,
                     true,
-                )?,
-                SemanticAction::SetBool { attribute, value } => {
-                    let name = CFString::from_str(&attribute);
-                    let mut settable = 0;
-                    check(
-                        element.is_attribute_settable(&name, NonNull::from(&mut settable)),
-                        &attribute,
-                        false,
-                    )?;
-                    if settable == 0 {
-                        return Err(error(
-                            "unsupported",
-                            "Attribute is not settable",
-                            Effect::None,
-                        ));
-                    }
-                    check(
-                        element.set_attribute_value(&name, CFBoolean::new(value)),
-                        &attribute,
-                        true,
-                    )?;
+                )?;
+            },
+            SemanticAction::SetString { attribute, value } => {
+                set_value(&element, &attribute, &CFString::from_str(&value))?
+            }
+            SemanticAction::SetBool { attribute, value } => {
+                set_value(&element, &attribute, CFBoolean::new(value))?
+            }
+            SemanticAction::SetInteger { attribute, value } => {
+                set_value(&element, &attribute, &CFNumber::new_i64(value))?
+            }
+            SemanticAction::SetFloat { attribute, value } => {
+                if !value.is_finite() {
+                    return Err(error(
+                        "invalid_request",
+                        "Finite set value required",
+                        Effect::None,
+                    ));
                 }
-                SemanticAction::SetString { attribute, value } => {
-                    let name = CFString::from_str(&attribute);
-                    let mut settable = 0;
-                    check(
-                        element.is_attribute_settable(&name, NonNull::from(&mut settable)),
-                        &attribute,
-                        false,
-                    )?;
-                    if settable == 0 {
-                        return Err(error(
-                            "unsupported",
-                            "Attribute is not settable",
-                            Effect::None,
-                        ));
-                    }
-                    check(
-                        element.set_attribute_value(&name, &CFString::from_str(&value)),
-                        &attribute,
-                        true,
-                    )?;
+                set_value(&element, &attribute, &CFNumber::new_f64(value))?;
+            }
+            SemanticAction::SetRange {
+                attribute,
+                location,
+                length,
+            } => {
+                if location < 0 || length < 0 || location.checked_add(length).is_none() {
+                    return Err(error(
+                        "invalid_request",
+                        "Invalid UTF-16 range",
+                        Effect::None,
+                    ));
                 }
+                let range = CFRange::new(location as isize, length as isize);
+                // SAFETY: matching CFRange layout remains alive during AXValueCreate's copy.
+                let value =
+                    unsafe { AXValue::new(AXValueType::CFRange, NonNull::from(&range).cast()) }
+                        .ok_or_else(|| {
+                            error("native_value", "Cannot create range", Effect::None)
+                        })?;
+                set_value(&element, &attribute, &value)?;
+            }
+            SemanticAction::SetPoint { attribute, value } => {
+                if !value.x.is_finite() || !value.y.is_finite() {
+                    return Err(error(
+                        "invalid_request",
+                        "Finite point required",
+                        Effect::None,
+                    ));
+                }
+                let point = CGPoint::new(value.x, value.y);
+                // SAFETY: matching CGPoint layout remains alive during copy.
+                let value =
+                    unsafe { AXValue::new(AXValueType::CGPoint, NonNull::from(&point).cast()) }
+                        .ok_or_else(|| {
+                            error("native_value", "Cannot create point", Effect::None)
+                        })?;
+                set_value(&element, &attribute, &value)?;
+            }
+            SemanticAction::SetSize {
+                attribute,
+                width,
+                height,
+            } => {
+                if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
+                    return Err(error(
+                        "invalid_request",
+                        "Positive finite size required",
+                        Effect::None,
+                    ));
+                }
+                let size = CGSize::new(width, height);
+                // SAFETY: matching CGSize layout remains alive during copy.
+                let value =
+                    unsafe { AXValue::new(AXValueType::CGSize, NonNull::from(&size).cast()) }
+                        .ok_or_else(|| error("native_value", "Cannot create size", Effect::None))?;
+                set_value(&element, &attribute, &value)?;
             }
         }
         Ok(Receipt {

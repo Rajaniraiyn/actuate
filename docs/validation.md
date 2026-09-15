@@ -13,7 +13,7 @@ Checked on this development Mac on 2026-09-15. These are observations on the ins
 
 ## Known input limits
 
-Process-directed public Quartz clicking and scrolling returned dispatch receipts but did not produce the intended fixture effects. The backend does not retry or switch to global delivery. Tests explicitly observe this limitation before testing global delivery as a separate operation. Window-targeted routing, event metadata, and SkyLight remain follow-up work.
+Process-directed public Quartz clicking and scrolling returned dispatch receipts but did not produce the intended fixture effects. The backend does not retry or switch to global delivery. Tests explicitly observe this limitation before testing global delivery as a separate operation. The separate SkyLight provider now implements window-targeted packets; see [SkyLight validation](skylight.md#host-validation) for its app-specific results. This does not change the public Quartz result.
 
 No assertion claims that a successful public event-post call proves event consumption or that a PID identifies a particular window. Global input may change foreground interaction and the shared pointer. No background-focus guarantee has been validated.
 
@@ -37,4 +37,20 @@ System Settings produced native invalid-element errors during observation. Contr
 
 `cargo test --workspace` covers strict mutation parsing, observation defaults, retained opaque native values and nonfinite float preservation. `tests/macos_e2e.py` checks the live paths described above. Formatting and Clippy are also checked.
 
-Screenshots, display transforms, subscriptions, physical key chords, SkyLight, mobile/Windows/Linux implementations, C ABI and Node addons are not implemented or validated in this slice. Tests did not change System Settings preferences or edit user documents.
+Subscriptions, mobile/Windows/Linux implementations, C ABI and Node addons remain unimplemented. Tests did not change System Settings preferences or edit user documents.
+
+## Expanded implementation, 2026-09-16
+
+The runtime now includes snapshot diff/query, capture mappings, native ScreenCaptureKit capture, physical keys, richer pointer actions and SkyLight. Implementation availability is separate from host compatibility. The earlier app table remains a record of the original observation samples.
+
+Core tests added during this iteration cover incomplete diff coverage, reparenting with stable references, foreign/duplicate references, parameter changes, read errors and nested opaque values, null versus missing attributes, alternative native names, and invalid geometry. The final workspace run passed 18 core tests, 10 macOS tests and two overlay tests. Two permission-dependent capture unit tests stay ignored in the default suite; live capture paths were checked separately.
+
+[SkyLight host results](skylight.md#host-validation) document the fixture and native event-probe checks, including a background first-mouse limitation. The [overlay README](../crates/unimation-overlay/README.md#validation) records its independent visual test. Neither establishes support for every application, display layout or system panel.
+
+The expanded live fixture suite passed checkbox semantic toggles and explicit glyph clicking, slider clicking, popup menu selection, modal sheet discovery/dismissal and rejection of a global reference click beneath the sheet, dynamic insertion/removal diffs, unchanged sibling references, window-local clicking, and 300-pixel resized native window capture followed by an effective image click. Reusing that frame after input returned `stale_frame` with no effect.
+
+The integrated overlay followed SkyLight input while the foreground PID and shared cursor coordinates stayed unchanged. Both native and executable desktop captures visibly contained the purple pointer after the helper rendered. An earlier capture preceded visible rendering, so queue acceptance remains distinct from a rendered-frame acknowledgement. Only one physical display layout was tested live; negative origins and differing scales have unit coverage.
+
+Formatting, workspace Clippy with warnings denied, and a macOS build without the native-capture feature passed. Native capture has a 15-second caller deadline, but macOS callbacks can finish work after that deadline. An output write failure may leave a partial destination file, which is never reported as a successful frame. These recovery cases remain follow-up work.
+
+The session now queues optional cursor visualization after SkyLight dispatch and exposes `cursor_state`. This integration is pending the final live test report. AX bounds-center selection remains a heuristic; controls with blank space inside their accessibility bounds require observed acceptance or a more precise point.
