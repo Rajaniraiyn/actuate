@@ -2,19 +2,20 @@ name unimation
 bin unimation
 version "0.1.0"
 subcommand_required #true
-flag "-p --provider" help="Automation provider: native host, macos, or ios." global=#true env=UNIMATION_PROVIDER default=native {
+flag "-p --provider" help="Automation provider; native selects the host, apple-simulator selects CoreSimulator." global=#true env=UNIMATION_PROVIDER default=native {
     arg <PROVIDER> {
         choices {
             choice native
             choice macos
-            choice ios
+            choice apple-simulator
+            choice apple-device
         }
     }
 }
-flag --device help="Explicit provider device UUID; no implicit first-device selection." global=#true env=UNIMATION_DEVICE {
+flag --device help="Explicit provider device UDID; no implicit first-device selection." global=#true env=UNIMATION_DEVICE {
     arg <DEVICE>
 }
-flag --device-set help="Existing simulator device set, required for the iOS provider." global=#true env=UNIMATION_DEVICE_SET {
+flag --device-set help="Existing simulator device set, required for apple-simulator." global=#true env=UNIMATION_DEVICE_SET {
     arg <DEVICE_SET>
 }
 flag --format help="Output format. Text is plain and identical in terminals and pipes." global=#true default=text {
@@ -40,8 +41,14 @@ cmd completions help="Generate a shell completion script using the command speci
         }
     }
 }
-cmd ios help="iOS-specific resource discovery; interaction uses the shared commands." subcommand_required=#true {
+cmd apple help="Apple resource discovery; interaction uses the shared commands." subcommand_required=#true {
     flag "-h --help" help="Print help" action=help builtin=#true
+    cmd devices help="Discover physical Apple devices through the available transport." subcommand_required=#true {
+        flag "-h --help" help="Print help" action=help builtin=#true
+        cmd list {
+            flag "-h --help" help="Print help" action=help builtin=#true
+        }
+    }
     cmd simulators help="Inspect installed simulators without booting or installing anything." subcommand_required=#true {
         flag "-h --help" help="Print help" action=help builtin=#true
         cmd list help="List native runtime, device-type and device records." {

@@ -954,3 +954,36 @@ The redesigned renderer was visually inspected on macOS. A show/move/click/hide
 cycle left foreground PID and shared pointer coordinates unchanged. Mixed-DPI
 screen crossings and other platform renderers remain unvalidated. Multi-session
 cursors, arrival acknowledgements and idle timer suspension remain future work.
+
+
+## Implemented physical-device and wait adapters
+
+The iOS crate now separates macOS-only simulator modules from feature-gated
+`physical` services. `idevice` 0.1.68 supplies usbmuxd discovery and legacy screenshotr
+capture through async APIs and a reusable sync `Capture` adapter. CLI selection is
+`--provider apple-device`; CoreSimulator uses `--provider apple-simulator`. These protocols are not
+interchangeable. No guest helper binary is deployed by either route.
+
+Discovery preserves uncertain completeness, requires explicit capture UDIDs and
+rejects ambiguous transports. Captures preserve encoded bytes and unknown orientation;
+no click mapping is fabricated. Modern RSD/DVT capture, video streaming and physical
+AX/input are not implemented. See [physical implementation status](crates/ios/PHYSICAL.md).
+
+`unimation::wait` now supplies bounded, read-only query presence/absence waits over
+`ObserveScope`, usable by both macOS and simulator providers. Reports include full
+last-observation evidence; incomplete coverage cannot establish absence. It neither
+heals old references nor retries input. Native synchronous deadlines still require
+provider cooperation. Observer notifications and locator recovery remain future work.
+
+The cursor renderer now uses Cua's MIT-licensed rounded notched outline, with source
+and license in `crates/overlay/THIRD_PARTY_NOTICES.md`. A neutral fill replaces purple.
+Its roughly 16-point body is independent of the existing click-ring radius. Native
+AppKit point rendering handles backing scale, rather than multiplying input desktop
+coordinates by screenshot resolution. Mixed-display visual validation is pending.
+
+Apple CLI resource discovery is now grouped under `apple simulators list` and
+`apple devices list`. Public provider values are `apple-simulator` and `apple-device`,
+without legacy aliases during this experimental phase. Only the simulator branch is
+intrinsically macOS-only; physical transport feature gates remain independent. Future
+Apple device families belong behind those provider capabilities, not new top-level
+OS-specific interaction commands.

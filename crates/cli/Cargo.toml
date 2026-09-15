@@ -14,3 +14,7 @@ serde_json.workspace = true
 usage.workspace = true
 serde.workspace = true
 ios.workspace = true
+
+[features]
+default = ["idevice"]
+idevice = ["ios/physical"]

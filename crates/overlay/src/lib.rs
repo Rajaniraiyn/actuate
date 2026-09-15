@@ -3,6 +3,7 @@ use unimation::{Effect, NativeError, Result};
 
 mod controller;
 pub mod motion;
+pub mod shape;
 pub use controller::OverlayController;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -36,7 +37,7 @@ impl Default for CursorAppearance {
     fn default() -> Self {
         Self {
             scale: 1.,
-            color: [0.46, 0.28, 0.95],
+            color: [0.16, 0.18, 0.22],
             motion: Default::default(),
         }
     }

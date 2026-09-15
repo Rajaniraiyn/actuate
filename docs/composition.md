@@ -53,7 +53,7 @@ unversioned native struct layout is an IPC protocol. A future binary adapter can
 the typed execution path without replacing JSON output for agents. JSON replies stream borrowed typed results
 directly to the writer instead of copying a snapshot into another JSON value tree.
 
-`unimation --provider ios session` delegates to the library. The optional `unimation-ios` binary
+`unimation --provider apple-simulator session` delegates to the library. The optional `unimation-ios` binary
 also belongs to the iOS crate; build it with `cargo build -p ios --features cli`.
 Its parser uses the same workspace `usage` dependency as the umbrella CLI. It is not a
 guest agent and is not needed by Rust callers. The backend does not upload an executable
@@ -94,3 +94,25 @@ boundary, distinct from the macOS Simulator host.
 
 Temporary simulator creation and cleanup remain in test scripts. Connecting the library
 to a running simulator does not acquire ownership of its lifecycle or delete its data.
+
+
+## Physical iOS capture
+
+With `ios/physical`, `PhysicalCapture` implements only `Capture`. Composing it with
+`Backend::new(Unavailable).with_capture(capture)` provides capture without pretending
+that observation or input exists. `PhysicalDevices` exposes async discovery/capture;
+its sync adapter reuses one Tokio runtime and rejects nested runtime entry. Device
+identity is explicit, and transport IDs are resolved again after reconnect.
+
+## Evidence-based waits
+
+`unimation::wait::wait_for_query` accepts any `ObserveScope` provider, a caller-chosen
+scope, query, `Present`/`Absent` condition, timeout and observation limit. The report
+retains the last full snapshot, elapsed time and observed evidence. Incomplete
+coverage cannot prove absence. Synchronous native calls may exceed the deadline;
+a late result is retained but is not reported as a wait completed within budget.
+Native errors propagate unchanged and no input operation is retried.
+
+macOS accepts an explicit application PID as its observation scope;
+iOS Simulator uses its existing `SimulatorScope`. This wait API currently belongs
+to the Rust library, not a new CLI command or a claimed notification provider.

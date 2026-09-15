@@ -9,6 +9,9 @@ unimation.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 usage = { workspace = true, optional = true }
+idevice = { version = "=0.1.68", default-features = false, features = ["usbmuxd", "screenshotr", "ring"], optional = true }
+tokio = { version = "1", features = ["rt", "time", "net"], optional = true }
+imagesize = { version = "0.14", optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 objc2 = "0.6.4"
@@ -17,6 +20,7 @@ objc2-core-foundation = "0.3.2"
 block2 = "0.6.2"
 
 [features]
+physical = ["dep:idevice", "dep:tokio", "dep:imagesize"]
 cli = ["dep:usage"]
 
 [[bin]]

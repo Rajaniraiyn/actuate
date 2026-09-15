@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod geometry;
 pub mod presentation;
 pub mod query;
+pub mod wait;
 pub use actions::*;
 // Independent provider capabilities. Native handles never cross this boundary.
 use serde::{Deserialize, Serialize};

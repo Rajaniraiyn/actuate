@@ -3,13 +3,13 @@
 Shared commands select their provider through `--provider` or `UNIMATION_PROVIDER`.
 The explicit flag takes precedence over the environment. The default `native` uses
 the host backend, currently macOS. It never selects a simulator merely because one
-is installed. The accepted values are `native`, `macos`, and `ios`.
+is installed. The default build accepts `native`, `macos`, `apple-simulator`, and `apple-device`.
 
 ```sh
 unimation snapshot --format text
-unimation --provider ios --device UUID --device-set /absolute/device/set session
-UNIMATION_PROVIDER=ios UNIMATION_DEVICE=UUID UNIMATION_DEVICE_SET=/absolute/device/set unimation snapshot --format text
-unimation ios simulators list
+unimation --provider apple-simulator --device UUID --device-set /absolute/device/set session
+UNIMATION_PROVIDER=apple-simulator UNIMATION_DEVICE=UUID UNIMATION_DEVICE_SET=/absolute/device/set unimation snapshot --format text
+unimation apple simulators list
 unimation completions zsh
 ```
 
@@ -55,5 +55,31 @@ text, while `session --json` preserves the JSONL response protocol. Scripts that
 parse JSON must opt in. `spec`, `protocol`, and `completions` emit their documented
 artifact formats regardless of the data-output selection.
 
-The iOS discovery command and macOS/iOS provider choices are compiled only on
-macOS. Other hosts retain portable saved-snapshot tools and native-provider routing.
+The Apple simulator command and native macOS provider compile only on macOS.
+Physical Apple discovery has its own feature gate. Saved-snapshot tools are portable.
+
+## Physical iOS devices
+
+The default CLI build includes `--provider apple-device`. Library users enable the
+`ios/physical` feature; `cargo build -p cli --no-default-features` omits it.
+
+```sh
+unimation --provider apple-device discover
+unimation --provider apple-device capabilities
+unimation --provider apple-device --device DEVICE_UDID capture /absolute/new-frame.bin
+```
+
+Capture preserves the device's encoded image format and reports that format in
+metadata; a file extension does not request transcoding. The first adapter uses
+the legacy screenshotr service and does not imply modern iOS screenshot, streaming,
+accessibility or input support. It requires an existing usbmuxd service and pairing
+record. It does not launch a daemon, pair, install software or mount an image.
+`--device-set` belongs to the CoreSimulator provider and is rejected for apple-device.
+
+## Apple resource groups
+
+`apple simulators list` enumerates installed simulator resources on macOS.
+`apple devices list` enumerates physical-device records through idevice. The latter
+is feature-gated independently of the macOS-only simulator branch. These groups can
+accept future Apple device transports without introducing an iOS-specific top-level
+command. Their presence does not claim automation support for watchOS or tvOS.

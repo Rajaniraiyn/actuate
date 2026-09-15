@@ -2,12 +2,12 @@
 
 The `ios` crate runs on a macOS host and connects to one explicitly selected simulator.
 iPhone and iPad use the same backend; the runtime's device family determines the guest UI.
-This does not implement automation of a physical iPhone or iPad.
+Physical devices use the separate [idevice provider](../crates/ios/PHYSICAL.md), with discovery and limited still capture.
 See [provider composition](composition.md) for the typed embedding and transport boundaries.
 
 ## Installed runtimes and isolated devices
 
-`unimation ios simulators list` returns CoreSimulator's native JSON for installed devices, device
+`unimation apple simulators list --json` returns CoreSimulator's native JSON for installed devices, device
 types and runtimes. `--device-set /absolute/path` selects an isolated set. The executable
 comes from the installed CoreSimulator framework, bypassing Xcode's first-launch wrapper.
 No backend operation downloads a runtime.
@@ -30,7 +30,7 @@ still initializes guest data temporarily; the test removes its devices and direc
 ## Typed sessions and JSONL
 
 ```sh
-unimation --provider ios --device DEVICE_UUID --device-set /absolute/device/set session
+unimation --provider apple-simulator --device DEVICE_UUID --device-set /absolute/device/set session --json
 ```
 
 Rust callers use `ios::session::connect` and typed `Session::execute` directly.

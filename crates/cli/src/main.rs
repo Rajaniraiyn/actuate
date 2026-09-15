@@ -6,7 +6,11 @@ enum Provider {
     #[cfg(target_os = "macos")]
     Macos,
     #[cfg(target_os = "macos")]
+    #[usage(name = "apple-simulator")]
     Ios,
+    #[cfg(feature = "idevice")]
+    #[usage(name = "apple-device")]
+    Idevice,
 }
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum Format {
@@ -42,7 +46,7 @@ enum CaptureRoute {
 #[derive(Cli)]
 #[usage(bin = "unimation", version, completion)]
 struct App {
-    /// Automation provider: native host, macos, or ios.
+    /// Automation provider; native selects the host, apple-simulator selects CoreSimulator.
     #[usage(
         short = 'p',
         long,
@@ -52,10 +56,10 @@ struct App {
         value_enum
     )]
     provider: Provider,
-    /// Explicit provider device UUID; no implicit first-device selection.
+    /// Explicit provider device UDID; no implicit first-device selection.
     #[usage(long, global, env = "UNIMATION_DEVICE")]
     device: Option<String>,
-    /// Existing simulator device set, required for the iOS provider.
+    /// Existing simulator device set, required for apple-simulator.
     #[usage(long, global, env = "UNIMATION_DEVICE_SET", value_hint = usage::ValueHint::DirPath)]
     device_set: Option<std::path::PathBuf>,
     /// Output format. Text is plain and identical in terminals and pipes.
@@ -80,11 +84,11 @@ enum Command {
         #[usage(value_enum)]
         shell: Shell,
     },
-    /// iOS-specific resource discovery; interaction uses the shared commands.
-    #[cfg(target_os = "macos")]
-    Ios {
+    /// Apple resource discovery; interaction uses the shared commands.
+    #[cfg(any(target_os = "macos", feature = "idevice"))]
+    Apple {
         #[usage(subcommand)]
-        command: IosCommand,
+        command: AppleCommand,
     },
     /// List running applications and accessibility permission state.
     Discover {
@@ -162,10 +166,17 @@ enum Command {
     /// Read JSON requests from stdin, retaining references until EOF.
     Session {},
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", feature = "idevice"))]
 #[derive(Subcommands)]
-enum IosCommand {
+enum AppleCommand {
+    /// Discover physical Apple devices through the available transport.
+    #[cfg(feature = "idevice")]
+    Devices {
+        #[usage(subcommand)]
+        command: DeviceCommand,
+    },
     /// Inspect installed simulators without booting or installing anything.
+    #[cfg(target_os = "macos")]
     Simulators {
         #[usage(subcommand)]
         command: SimulatorCommand,
@@ -177,6 +188,12 @@ enum SimulatorCommand {
     /// List native runtime, device-type and device records.
     List,
 }
+#[cfg(feature = "idevice")]
+#[derive(Subcommands)]
+enum DeviceCommand {
+    List,
+}
+
 struct Connection {
     provider: Provider,
     device: Option<String>,
@@ -311,8 +328,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         command => run(command, connection, format),
     }
 }
-#[cfg(not(target_os = "macos"))]
 fn run(
+    command: Command,
+    connection: Connection,
+    format: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "idevice")]
+    let command = if matches!(
+        command,
+        Command::Apple {
+            command: AppleCommand::Devices {
+                command: DeviceCommand::List
+            }
+        }
+    ) {
+        if connection.device_set.is_some() || connection.device.is_some() {
+            return Err("apple devices list does not select a device or simulator set".into());
+        }
+        let provider =
+            ios::physical::PhysicalCapture::from_env(std::time::Duration::from_secs(10))?;
+        return Ok(emit_value(
+            &serde_json::to_value(provider.discover()?)?,
+            format,
+        )?);
+    } else {
+        command
+    };
+    #[cfg(feature = "idevice")]
+    if connection.provider == Provider::Idevice {
+        use unimation::Capture;
+        if connection.device_set.is_some() {
+            return Err(
+                "--device-set selects CoreSimulator storage; omit it for --provider apple-device"
+                    .into(),
+            );
+        }
+        match command {
+            Command::Capabilities => {
+                return Ok(emit_value(&serde_json::to_value(ios::physical::capabilities())?, format)?);
+            }
+            Command::Discover { scope: DiscoveryScope::All } => {
+                if connection.device.is_some() {
+                    return Err("Device discovery does not select one device; omit --device".into());
+                }
+                let provider = ios::physical::PhysicalCapture::from_env(std::time::Duration::from_secs(10))?;
+                let devices = provider.discover()?;
+                if devices.devices.is_empty() && format == unimation::OutputFormat::Text {
+                    println!("No physical iOS devices returned by usbmuxd; inventory completeness is unknown.");
+                    return Ok(());
+                }
+                return Ok(emit_value(&serde_json::to_value(devices)?, format)?);
+            }
+            Command::Capture {path, display, window, backend, max_pixel_edge} => {
+                if display.is_some() || window.is_some() || backend != CaptureRoute::Native || max_pixel_edge.is_some() {
+                    return Err("apple-device capture returns the device's encoded screenshot; display/window selection, resizing and alternate routes are unavailable".into());
+                }
+                let udid = connection.device.ok_or("--provider apple-device capture requires --device UDID")?;
+                let mut provider = ios::physical::PhysicalCapture::from_env(std::time::Duration::from_secs(10))?;
+                let frame = provider.capture(udid)?.save(path)?;
+                return Ok(emit_value(&serde_json::to_value(frame)?, format)?);
+            }
+            _ => return Err("The apple-device provider currently supports discover, capabilities and capture. Accessibility, input, app discovery and interactive sessions are unavailable; CoreSimulator uses --provider apple-simulator.".into()),
+        }
+    }
+    run_host(command, connection, format)
+}
+#[cfg(not(target_os = "macos"))]
+fn run_host(
     _: Command,
     _: Connection,
     _: unimation::OutputFormat,
@@ -320,14 +402,14 @@ fn run(
     Err("No provider implemented for this OS yet".into())
 }
 #[cfg(target_os = "macos")]
-fn run(
+fn run_host(
     command: Command,
     connection: Connection,
     format: unimation::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use unimation::{Discover, ObserveRequest};
-    if let Command::Ios {
-        command: IosCommand::Simulators {
+    if let Command::Apple {
+        command: AppleCommand::Simulators {
             command: SimulatorCommand::List,
         },
     } = command
@@ -366,11 +448,11 @@ fn run(
         let udid = connection
             .device
             .as_deref()
-            .ok_or("--provider ios requires --device UUID")?;
+            .ok_or("--provider apple-simulator requires --device UUID")?;
         let set = connection
             .device_set
             .as_deref()
-            .ok_or("--provider ios requires --device-set PATH")?;
+            .ok_or("--provider apple-simulator requires --device-set PATH")?;
         let request = match command {
             Command::Session {} => {
                 return ios::jsonl::run_formatted(udid, set, format);
@@ -401,12 +483,13 @@ fn run(
     }
     if connection.device.is_some() || connection.device_set.is_some() {
         return Err(
-            "--device and --device-set require --provider ios or ios simulators list".into(),
+            "--device and --device-set require --provider apple-simulator or apple simulators list"
+                .into(),
         );
     }
     let mut ax = macos::Accessibility::new();
     let result = match command {
-        Command::Ios { .. } => unreachable!(),
+        Command::Apple { .. } => unreachable!(),
         Command::Discover { scope } => {
             let scope = match scope {
                 DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,

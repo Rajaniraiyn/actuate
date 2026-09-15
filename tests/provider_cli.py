@@ -8,11 +8,11 @@ base = {k: v for k, v in os.environ.items() if not k.startswith('UNIMATION_')}
 def run(*args, **env):
     return subprocess.run([BIN, *args], env=base | env, text=True, capture_output=True)
 
-r = run('session', UNIMATION_PROVIDER='ios')
+r = run('session', UNIMATION_PROVIDER='apple-simulator')
 assert r.returncode and 'requires --device' in r.stderr, r
-r = run('--provider', 'ios', 'session', UNIMATION_PROVIDER='invalid')
+r = run('--provider', 'apple-simulator', 'session', UNIMATION_PROVIDER='invalid')
 assert r.returncode and 'requires --device' in r.stderr, r
-r = run('session', '--provider', 'ios', UNIMATION_DEVICE='test')
+r = run('session', '--provider', 'apple-simulator', UNIMATION_DEVICE='test')
 assert r.returncode and 'requires --device-set' in r.stderr, r
 for args, env in [(('session',), {'UNIMATION_PROVIDER': 'invalid'}),
                   (('snapshot', '--format', 'invalid'), {}),
@@ -26,7 +26,7 @@ for shell in ('bash', 'zsh', 'fish'):
 r = run('spec')
 assert r.returncode == 0 and 'UNIMATION_PROVIDER' in r.stdout
 assert 'ios-session' not in r.stdout and 'ios-list' not in r.stdout
-r = run('ios', 'simulators', 'list', '--help')
+r = run('apple', 'simulators', 'list', '--help')
 assert r.returncode == 0 and '--device-set' in r.stdout
 
 r = run('view', '/nonexistent', '--json', '--format', 'text')

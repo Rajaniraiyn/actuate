@@ -1,6 +1,7 @@
 use overlay::{
     CursorAppearance, CursorCommand as Command,
     motion::{self, MotionStyle},
+    shape::{HOTSPOT, OUTLINE, UNIT},
 };
 const SIZE: f64 = 96.;
 const TIP: (f64, f64) = (96., 160.);
@@ -31,7 +32,10 @@ define_class!(
             let visual = self.ivars();
             let appearance = visual.appearance.borrow();
             let scale = appearance.scale;
-            let point = |x: f64, y: f64| NSPoint::new(TIP.0 + x * scale, TIP.1 - y * scale);
+            let point = |x: f64, y: f64| NSPoint::new(
+                TIP.0 + (x - HOTSPOT.0) * UNIT * scale,
+                TIP.1 - (y - HOTSPOT.1) * UNIT * scale,
+            );
             let [r,g,b] = appearance.color;
             let pulse = visual.pulse.get();
             if let Some(t) = pulse {
@@ -42,9 +46,15 @@ define_class!(
                 ring.stroke();
             }
             let shape=NSBezierPath::bezierPath();
-            shape.moveToPoint(point(0.,0.));
-            for (x,y) in [(1.,25.),(7.,19.),(12.,30.),(17.,27.5),(12.,17.),(21.,16.)] {
-                shape.lineToPoint(point(x,y));
+            shape.moveToPoint(point(OUTLINE[0].point.0, OUTLINE[0].point.1));
+            for index in 0..OUTLINE.len() {
+                let from = OUTLINE[index];
+                let to = OUTLINE[(index + 1) % OUTLINE.len()];
+                shape.curveToPoint_controlPoint1_controlPoint2(
+                    point(to.point.0, to.point.1),
+                    point(from.point.0 + from.outgoing.0, from.point.1 + from.outgoing.1),
+                    point(to.point.0 + to.incoming.0, to.point.1 + to.incoming.1),
+                );
             }
             shape.closePath();
             NSGraphicsContext::saveGraphicsState_class();

@@ -1,22 +1,11 @@
-//! iOS and iPadOS Simulator providers. Device family is a runtime property.
-//! Native bridge support is hosted on macOS; no installed guest helper is required.
-#![cfg(target_os = "macos")]
+//! Composable iOS and iPadOS providers. Device family is a runtime property.
+//! CoreSimulator support is hosted on macOS. Optional physical-device services
+//! use usbmuxd on supported hosts; neither route requires our own guest helper.
+#[cfg(feature = "physical")]
+pub mod physical;
 
-mod accessibility;
-pub use accessibility::{SimulatorAccessibility, SimulatorScope};
-
-pub mod simulator;
-
-pub mod hid;
-pub use hid::SimulatorHid;
-
-pub mod providers;
-
-pub mod jsonl;
-pub mod session;
-
-#[cfg(feature = "cli")]
-pub mod cli;
-
-pub mod pointer;
-pub use pointer::SimulatorPointer;
+#[cfg(target_os = "macos")]
+#[path = "simulator_backend.rs"]
+mod simulator_backend;
+#[cfg(target_os = "macos")]
+pub use simulator_backend::*;
