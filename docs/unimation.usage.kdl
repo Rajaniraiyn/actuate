@@ -17,6 +17,16 @@ flag --device help="Explicit provider device UUID; no implicit first-device sele
 flag --device-set help="Existing simulator device set, required for the iOS provider." global=#true env=UNIMATION_DEVICE_SET {
     arg <DEVICE_SET>
 }
+flag --format help="Output format. Text is plain and identical in terminals and pipes." global=#true default=text {
+    arg <FORMAT> {
+        choices {
+            choice json
+            choice compact
+            choice text
+        }
+    }
+}
+flag --json help="Emit full JSON; sessions emit one JSON response per line." global=#true conflicts=--format
 flag "-h --help" help="Print help" action=help builtin=#true
 flag "-V --version" help="Print version" action=version builtin=#true
 complete device_set type=dir
@@ -40,15 +50,6 @@ cmd ios help="iOS-specific resource discovery; interaction uses the shared comma
     }
 }
 cmd discover help="List running applications and accessibility permission state." {
-    flag --format default=json {
-        arg <FORMAT> {
-            choices {
-                choice json
-                choice compact
-                choice text
-            }
-        }
-    }
     flag --scope default=all {
         arg <SCOPE> {
             choices {
@@ -67,15 +68,6 @@ cmd observe help="Read the native accessibility tree for an application." {
     flag --max-depth default="30" {
         arg <MAX_DEPTH>
     }
-    flag --format default=json {
-        arg <FORMAT> {
-            choices {
-                choice json
-                choice compact
-                choice text
-            }
-        }
-    }
     flag --interactive
     flag --hide-hidden
     flag --limit default="200" {
@@ -93,15 +85,6 @@ cmd observe help="Read the native accessibility tree for an application." {
     arg "[PID]"
 }
 cmd view help="Render a saved native snapshot without changing its references." {
-    flag --format default=text {
-        arg <FORMAT> {
-            choices {
-                choice json
-                choice compact
-                choice text
-            }
-        }
-    }
     flag --root {
         arg <ROOT>
     }
@@ -145,15 +128,6 @@ cmd capabilities help="Report delivery routes and availability." {
 }
 cmd diff help="Compare two snapshots saved from the same live session." {
     flag --modified-only
-    flag --format default=json {
-        arg <FORMAT> {
-            choices {
-                choice json
-                choice compact
-                choice text
-            }
-        }
-    }
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <BEFORE>
     arg <AFTER>
@@ -178,14 +152,5 @@ cmd protocol help="Show JSON session commands and delivery semantics." {
     flag "-h --help" help="Print help" action=help builtin=#true
 }
 cmd session help="Read JSON requests from stdin, retaining references until EOF." {
-    flag --format help="JSONL is the machine protocol; text is a framed interactive transcript." default=json {
-        arg <FORMAT> {
-            choices {
-                choice json
-                choice compact
-                choice text
-            }
-        }
-    }
     flag "-h --help" help="Print help" action=help builtin=#true
 }

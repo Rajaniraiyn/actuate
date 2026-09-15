@@ -18,7 +18,7 @@ macOS requires an installed Apple SDK and linker. If the default Xcode selection
 For a shorter application list, use `unimation discover --scope apps --format text`.
 This includes regular apps, processes with visible windows, and known macOS system controls.
 It reports how many records were omitted. `--format compact` provides a JSON projection;
-the default `--scope all --format json` retains all native discovery records.
+`--scope all --json` retains all native discovery records.
 
 `discover` reports actual accessibility trust without prompting. Permission inheritance depends on the host and launch context; the backend checks it at runtime.
 
@@ -28,7 +28,7 @@ the default `--scope all --format json` retains all native discovery records.
 
 ## Agent sessions
 
-`unimation session` reads one JSON request per line and writes one JSON response per line. Keep the process alive to retain references. One-shot `observe` results are historical; their references cannot be used in another process.
+`unimation session --json` reads one JSON request per line and writes one JSON response per line. Keep the process alive to retain references. One-shot `observe` results are historical; their references cannot be used in another process.
 
 ```json
 {"op":"discover"}
@@ -45,7 +45,7 @@ Use returned references, never guessed IDs. Input requires an explicit route. Re
 
 Sessions retain the latest 32 snapshots and 32 captures. `query` filters a retained snapshot without removing native attributes from returned nodes. `diff` compares increasing revisions of the same root and reports field changes, new observations, scope removals and uncertain absence separately. Querying and diffing do not refresh the UI; observe again after an action.
 
-Raw JSON remains the default for `observe` and `session`. Use `observe 1234 --format text` for a bounded tree, `--format compact` for structured presentation rows, or `view snapshot.json --root @e12 --interactive` to render a saved subtree. Presentation keeps native references and raw observations intact. Collection limits and displayed-row limits are separate. See [compact output and visibility](docs/presentation.md).
+Concise text is the default for all data commands. Use global `--json` for full JSON records or JSONL session replies. Use `observe 1234 --format text` for a bounded tree, `--format compact` for structured presentation rows, or `view snapshot.json --root @e12 --interactive` to render a saved subtree. Presentation keeps native references and raw observations intact. Collection limits and displayed-row limits are separate. See [compact output and visibility](docs/presentation.md).
 
 The live `actionability` session request reports native states, geometry, attached-sheet checks and a sampled global center hit test. An interactive row is a candidate, not a clickability guarantee. Hidden, offscreen, occluded and unknown are different states, and global-pointer evidence does not determine SkyLight delivery.
 

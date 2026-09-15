@@ -3,7 +3,9 @@ use usage::{Cli, Subcommands, ValueEnum};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum Provider {
     Native,
+    #[cfg(target_os = "macos")]
     Macos,
+    #[cfg(target_os = "macos")]
     Ios,
 }
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -56,6 +58,12 @@ struct App {
     /// Existing simulator device set, required for the iOS provider.
     #[usage(long, global, env = "UNIMATION_DEVICE_SET", value_hint = usage::ValueHint::DirPath)]
     device_set: Option<std::path::PathBuf>,
+    /// Output format. Text is plain and identical in terminals and pipes.
+    #[usage(long, global, default = "text", value_enum)]
+    format: Format,
+    /// Emit full JSON; sessions emit one JSON response per line.
+    #[usage(long, global, conflicts = "format")]
+    json: bool,
     #[usage(subcommand)]
     command: Command,
 }
@@ -73,14 +81,13 @@ enum Command {
         shell: Shell,
     },
     /// iOS-specific resource discovery; interaction uses the shared commands.
+    #[cfg(target_os = "macos")]
     Ios {
         #[usage(subcommand)]
         command: IosCommand,
     },
     /// List running applications and accessibility permission state.
     Discover {
-        #[usage(long, default = "json", value_enum)]
-        format: Format,
         #[usage(long, default = "all", value_enum)]
         scope: DiscoveryScope,
     },
@@ -92,8 +99,6 @@ enum Command {
         max_nodes: usize,
         #[usage(long, default = "30")]
         max_depth: usize,
-        #[usage(long, default = "json", value_enum)]
-        format: Format,
         #[usage(long)]
         interactive: bool,
         #[usage(long)]
@@ -106,8 +111,6 @@ enum Command {
     /// Render a saved native snapshot without changing its references.
     View {
         snapshot: std::path::PathBuf,
-        #[usage(long, default = "text", value_enum)]
-        format: Format,
         #[usage(long)]
         root: Option<String>,
         #[usage(long)]
@@ -141,8 +144,6 @@ enum Command {
         after: std::path::PathBuf,
         #[usage(long)]
         modified_only: bool,
-        #[usage(long, default = "json", value_enum)]
-        format: Format,
     },
     /// Query a saved snapshot without discarding fields from matching nodes.
     Query {
@@ -159,12 +160,9 @@ enum Command {
     /// Show JSON session commands and delivery semantics.
     Protocol,
     /// Read JSON requests from stdin, retaining references until EOF.
-    Session {
-        /// JSONL is the machine protocol; text is a framed interactive transcript.
-        #[usage(long, default = "json", value_enum)]
-        format: Format,
-    },
+    Session {},
 }
+#[cfg(target_os = "macos")]
 #[derive(Subcommands)]
 enum IosCommand {
     /// Inspect installed simulators without booting or installing anything.
@@ -173,6 +171,7 @@ enum IosCommand {
         command: SimulatorCommand,
     },
 }
+#[cfg(target_os = "macos")]
 #[derive(Subcommands)]
 enum SimulatorCommand {
     /// List native runtime, device-type and device records.
@@ -185,6 +184,11 @@ struct Connection {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::parse();
+    let format = if app.json {
+        unimation::OutputFormat::Json
+    } else {
+        app.format.into()
+    };
     if let Command::Completions { shell } = app.command {
         let shell = match shell {
             Shell::Bash => usage::complete::Shell::Bash,
@@ -212,13 +216,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             before,
             after,
             modified_only,
-            format,
         } => {
             let before: unimation::Snapshot =
                 serde_json::from_reader(std::fs::File::open(before)?)?;
             let after: unimation::Snapshot = serde_json::from_reader(std::fs::File::open(after)?)?;
             let diff = unimation::diff::diff_snapshots(&before, &after)?;
-            let format = unimation::OutputFormat::from(format);
             if format == unimation::OutputFormat::Compact {
                 if modified_only {
                     return Err("--modified-only selects native fields; use --format json or text for that mode".into());
@@ -264,7 +266,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::View {
             snapshot,
-            format,
             root,
             interactive,
             hide_hidden,
@@ -277,7 +278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .transpose()?;
             emit_snapshot(
                 &snapshot,
-                unimation::OutputFormat::from(format),
+                format,
                 &unimation::presentation::PresentationOptions {
                     root,
                     actionable_only: interactive,
@@ -301,21 +302,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 action,
                 ..Default::default()
             };
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&unimation::query::query_nodes(&snapshot, &query))?
-            );
+            emit_value(
+                &serde_json::to_value(unimation::query::query_nodes(&snapshot, &query))?,
+                format,
+            )?;
             Ok(())
         }
-        command => run(command, connection),
+        command => run(command, connection, format),
     }
 }
 #[cfg(not(target_os = "macos"))]
-fn run(_: Command, _: Connection) -> Result<(), Box<dyn std::error::Error>> {
+fn run(
+    _: Command,
+    _: Connection,
+    _: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
     Err("No provider implemented for this OS yet".into())
 }
 #[cfg(target_os = "macos")]
-fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
+fn run(
+    command: Command,
+    connection: Connection,
+    format: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
     use unimation::{Discover, ObserveRequest};
     if let Command::Ios {
         command: IosCommand::Simulators {
@@ -330,7 +339,27 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
         if let Some(path) = connection.device_set {
             sim = sim.with_set(path);
         }
-        println!("{}", serde_json::to_string_pretty(&sim.list()?)?);
+        let inventory = sim.list()?;
+        if format == unimation::OutputFormat::Text {
+            let mut rows = Vec::new();
+            for runtime in inventory["runtimes"].as_array().into_iter().flatten() {
+                rows.push(serde_json::json!({"runtime":runtime["identifier"],"name":runtime["name"],"available":runtime["isAvailable"]}));
+            }
+            if let Some(groups) = inventory["devices"].as_object() {
+                for (runtime, devices) in groups {
+                    for device in devices.as_array().into_iter().flatten() {
+                        rows.push(serde_json::json!({"runtime":runtime,"device":device["udid"],"name":device["name"],"state":device["state"],"available":device["isAvailable"]}));
+                    }
+                }
+            }
+            if rows.is_empty() {
+                println!("No simulator runtimes or devices installed.");
+            } else {
+                emit_value(&serde_json::Value::Array(rows), format)?;
+            }
+        } else {
+            emit_value(&inventory, format)?;
+        }
         return Ok(());
     }
     if connection.provider == Provider::Ios {
@@ -343,14 +372,14 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
             .as_deref()
             .ok_or("--provider ios requires --device-set PATH")?;
         let request = match command {
-            Command::Session { format } => {
-                return ios::jsonl::run_formatted(udid, set, unimation::OutputFormat::from(format));
+            Command::Session {} => {
+                return ios::jsonl::run_formatted(udid, set, format);
             }
-            Command::Observe { pid, max_nodes, max_depth, format, interactive, hide_hidden, limit, scope } => {
+            Command::Observe { pid, max_nodes, max_depth, interactive, hide_hidden, limit, scope } => {
                 if scope != SnapshotScope::Application { return Err("The iOS provider does not support --scope window; use its explicit observation scopes in a session".into()); }
                 ios::session::Request::Snapshot {
                     scope: pid.map(|pid| ios::SimulatorScope::Application {pid}).unwrap_or(ios::SimulatorScope::Frontmost),
-                    max_nodes, max_depth, format:unimation::OutputFormat::from(format),
+                    max_nodes, max_depth, format,
                     options:unimation::presentation::PresentationOptions {actionable_only:interactive,hide_known_hidden:hide_hidden,max_nodes:limit,..Default::default()},
                 }
             }
@@ -364,8 +393,9 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
             _ => return Err("This command is not supported by the selected iOS provider; use capabilities for its supported operations".into()),
         };
         let mut session = ios::session::connect(udid, set)?;
-        return Ok(ios::jsonl::write_result(
+        return Ok(ios::jsonl::write_result_formatted(
             &session.execute(request)?,
+            format,
             std::io::stdout().lock(),
         )?);
     }
@@ -377,8 +407,7 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
     let mut ax = macos::Accessibility::new();
     let result = match command {
         Command::Ios { .. } => unreachable!(),
-        Command::Discover { format, scope } => {
-            let format = unimation::OutputFormat::from(format);
+        Command::Discover { scope } => {
             let scope = match scope {
                 DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
                 DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
@@ -397,13 +426,11 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
             pid,
             max_nodes,
             max_depth,
-            format,
             interactive,
             hide_hidden,
             limit,
             scope,
         } => {
-            let format = unimation::OutputFormat::from(format);
             let pid = match pid {
                 Some(pid) => pid,
                 None => ax.discover()?["active_pid"]
@@ -475,8 +502,8 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
         }
         Command::Capabilities => macos::session::MacSession::new()
             .extension(macos::session::MacRequest::Capabilities {})?,
-        Command::Session { format } => {
-            return session(unimation::OutputFormat::from(format));
+        Command::Session {} => {
+            return session(format);
         }
         Command::Completions { .. }
         | Command::Spec
@@ -487,7 +514,7 @@ fn run(command: Command, connection: Connection) -> Result<(), Box<dyn std::erro
             unreachable!()
         }
     };
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    emit_value(&result, format)?;
     Ok(())
 }
 #[cfg(target_os = "macos")]
@@ -527,10 +554,10 @@ fn session(format: unimation::OutputFormat) -> Result<(), Box<dyn std::error::Er
                 {
                     emit_snapshot(&snapshot, format, &Default::default())?;
                 } else {
-                    println!("{}", serde_json::to_string(result)?);
+                    emit_value(result, format)?;
                 }
             } else {
-                println!("{}", serde_json::to_string(&reply)?);
+                emit_value(&reply, format)?;
             }
             println!("--- end ---");
         } else {
@@ -587,4 +614,8 @@ fn emit_snapshot(
         ),
     }
     Ok(())
+}
+
+fn emit_value(value: &serde_json::Value, format: unimation::OutputFormat) -> std::io::Result<()> {
+    unimation::output::write_value(std::io::stdout().lock(), value, format)
 }

@@ -9,7 +9,7 @@ import time
 
 class Session:
     def __init__(self):
-        self.p = subprocess.Popen(['target/debug/unimation', 'session'], stdin=subprocess.PIPE,
+        self.p = subprocess.Popen(['target/debug/unimation', 'session', '--json'], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, text=True, bufsize=1)
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.p.stdout, selectors.EVENT_READ)

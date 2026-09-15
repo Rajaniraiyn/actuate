@@ -82,6 +82,17 @@ pub fn write_result(response: &Response, mut writer: impl Write) -> std::io::Res
     }
     writer.flush()
 }
+pub fn write_result_formatted(
+    response: &Response,
+    format: OutputFormat,
+    writer: impl Write,
+) -> std::io::Result<()> {
+    if format != OutputFormat::Text || matches!(response, Response::Text(_)) {
+        return write_result(response, writer);
+    }
+    let value = serde_json::to_value(Encoded(response)).map_err(std::io::Error::other)?;
+    unimation::output::write_value(writer, &value, format)
+}
 pub fn serve<B: SessionBackend>(
     session: &mut Session<B>,
     reader: impl BufRead,
@@ -122,8 +133,10 @@ pub fn serve_formatted<B: SessionBackend>(
                 id.as_ref().unwrap_or(&Value::Null)
             )?;
             match &result {
-                Ok(response) => write_result(response, &mut writer)?,
-                Err(error) => writeln!(writer, "{}", json!({"error":error}))?,
+                Ok(response) => write_result_formatted(response, format, &mut writer)?,
+                Err(error) => {
+                    unimation::output::write_value(&mut writer, &json!({"error":error}), format)?
+                }
             }
             writeln!(writer, "--- end ---")?;
             writer.flush()?;

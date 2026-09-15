@@ -16,7 +16,7 @@ SIMCTL = '/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/
 class Session:
     def __init__(self, device_set, udid):
         self.process = subprocess.Popen(
-            ['target/debug/unimation', '--provider', 'ios', '--device-set', str(device_set), '--device', udid, 'session'],
+            ['target/debug/unimation', '--provider', 'ios', '--device-set', str(device_set), '--device', udid, 'session', '--json'],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)

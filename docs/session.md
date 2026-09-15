@@ -1,6 +1,6 @@
 # Session protocol
 
-Run `unimation session`. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
+Run `unimation session --json` for the JSONL protocol. Without `--json`, the CLI returns a framed text transcript. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
 
 The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
 
@@ -60,7 +60,7 @@ The implementation does not silently normalize native text, infer an action from
 
 ## Snapshot queries and differences
 
-Raw `observe` results and the session JSONL transport remain unchanged by default. Explicit `snapshot` and `view` requests can return text or compact JSON. `session --format compact` projects raw observation responses while retaining JSONL framing. `session --format text` changes the outer CLI response into a framed text transcript; use the default JSONL mode for existing machine clients.
+Raw `observe` results remain available through `session --json`. Explicit `snapshot` and `view` requests can return text or compact JSON. `session --format compact` projects raw observation responses while retaining JSONL framing. `session --format text` changes the outer CLI response into a framed text transcript; use `--json` for existing machine clients.
 
 ```json
 {"op":"snapshot","request":{"pid":1234,"max_nodes":1000,"max_depth":30},"scope":"focused_window","format":"text","options":{"actionable_only":true,"max_nodes":80}}
@@ -72,7 +72,7 @@ Raw `observe` results and the session JSONL transport remain unchanged by defaul
 
 Use actual returned IDs. `snapshot` collects a new observation and retains its full raw data. `view` only renders a retained observation. `format:"json"` returns raw data; `format:"compact"` returns presentation rows and coverage; `format:"text"` returns a tree string. `options.max_nodes` limits displayed rows, separately from `request.max_nodes`, which limits native collection. The presentation defaults are 200 displayed nodes and 160 characters per preview. Unknown visibility is retained by `hide_known_hidden`.
 
-The new `snapshot` and `view` operations default to text when `format` is omitted. `snapshot.scope` defaults to `application`; request `focused_window` to resolve the focused AX window before collection. This is separate from the CLI `snapshot` alias of `observe`, which retains JSON output by default.
+The new `snapshot` and `view` operations default to text when `format` is omitted. `snapshot.scope` defaults to `application`; request `focused_window` to resolve the focused AX window before collection. This is separate from the CLI `snapshot` alias of `observe`, which defaults to text.
 
 `diff_view` compares projected fields and defaults to 100 emitted changes. It reports `entered_view`, `left_view`, omissions and uncertain coverage. It does not claim native destruction or equality of omitted attributes. The raw `diff` operation is unchanged and remains available for complete field-level evidence.
 

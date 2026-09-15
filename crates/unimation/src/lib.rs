@@ -1,4 +1,5 @@
 pub mod composition;
+pub mod output;
 pub use composition::*;
 pub mod actions;
 pub mod diff;

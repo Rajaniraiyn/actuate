@@ -11,7 +11,7 @@ unimation view snapshot.json --root @e12 --interactive --limit 80
 unimation diff before.json after.json --format text
 ```
 
-Replace the PID and reference with discovered values. `observe` and `session` retain their JSON defaults. The new `view` command defaults to text. `--format compact` emits JSON containing presentation rows and coverage metadata. `--format json` exposes the native snapshot.
+Replace the PID and reference with discovered values. `observe`, `session`, and `view` default to text. Use `--json` for full machine output. `--format compact` emits JSON containing presentation rows and coverage metadata. `--format json` exposes the native snapshot.
 
 `--interactive` includes advertised actions and control candidates; it does not establish that a click will work. `--hide-hidden` excludes known hidden nodes and keeps unknown visibility. `--limit` limits displayed rows. The native `--max-nodes` and `--max-depth` collection budgets still control how much of the tree is read.
 
@@ -72,7 +72,7 @@ Unknown provider attributes, sparse trees, inaccessible embeddings and collectio
 
 ## Reference implementations
 
-- Agent-browser documents independent interactive, compact, depth and scoped snapshot controls, and a default text tree with references. Unimation adopts the presentation pattern while preserving its existing JSON defaults. [Snapshot documentation](https://agent-browser.dev/snapshots), [pinned renderer](https://github.com/vercel-labs/agent-browser/blob/8bbddb840c74d3c41b01d0b6804b059ba40de56e/cli/src/native/snapshot.rs#L1083).
+- Agent-browser documents independent interactive, compact, depth and scoped snapshot controls, and a default text tree with references. Unimation adopts the presentation pattern with opt-in full JSON output. [Snapshot documentation](https://agent-browser.dev/snapshots), [pinned renderer](https://github.com/vercel-labs/agent-browser/blob/8bbddb840c74d3c41b01d0b6804b059ba40de56e/cli/src/native/snapshot.rs#L1083).
 - Agent-browser's snapshot diff compares rendered lines. Unimation retains its semantic diff beneath presentation so truncation and uncertain absence retain their meaning. [Diff documentation](https://agent-browser.dev/diffing), [pinned diff implementation](https://github.com/vercel-labs/agent-browser/blob/8bbddb840c74d3c41b01d0b6804b059ba40de56e/cli/src/native/diff.rs).
 - Browser-use collects layout, scroll rectangles and paint order in its enhanced snapshot processing. Those inputs suggest separate evidence fields for a future browser adapter rather than one generic visibility guess. [Pinned enhanced snapshot code](https://github.com/browser-use/browser-use/blob/843819cb8131e1370948d381ede9be7f8366ddc4/browser_use/dom/enhanced_snapshot.py), [CDP DOMSnapshot protocol](https://chromedevtools.github.io/devtools-protocol/tot/DOMSnapshot/).
 - Playwright separates visibility, stability, enablement, editability and receiving events. Its visible-state definition is not a viewport-intersection check. Unimation keeps those distinctions across native input routes. [Actionability documentation](https://playwright.dev/docs/actionability).

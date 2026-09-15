@@ -28,4 +28,13 @@ assert r.returncode == 0 and 'UNIMATION_PROVIDER' in r.stdout
 assert 'ios-session' not in r.stdout and 'ios-list' not in r.stdout
 r = run('ios', 'simulators', 'list', '--help')
 assert r.returncode == 0 and '--device-set' in r.stdout
+
+r = run('view', '/nonexistent', '--json', '--format', 'text')
+assert r.returncode and 'cannot be used with' in r.stderr.lower(), r
+for extra, expect_json in [((), False), (('--json',), True)]:
+    r = subprocess.run([BIN, 'session', *extra], env=base, input='not json\n', text=True, capture_output=True)
+    assert r.returncode == 0, r
+    assert r.stdout.startswith('{') == expect_json, r
+    assert 'invalid_request' in r.stdout, r
+
 print('Provider CLI contracts passed')

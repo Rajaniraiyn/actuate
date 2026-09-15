@@ -39,3 +39,21 @@ require a valid selected device.
 
 References: [usage-rs derive](https://docs.rs/usage-derive/6.9.1/usage_derive/),
 [agent-browser commands](https://github.com/vercel-labs/agent-browser).
+
+## Output
+
+Data commands default to plain text, both in a terminal and when piped. There are
+no colors, progress bars or terminal-only decorations. Trees and diffs use bounded
+presentation views. Other records use tab-separated field paths and values, with
+control characters escaped so each value remains on one line. Simulator inventory
+text lists runtimes and devices; full metadata and device types require JSON.
+
+`--json` opts into full JSON. `--format text|compact|json` is the global alternative;
+passing both flags is an error. `compact` is structured JSON presentation, not a
+synonym for plain text. Session input remains JSONL; default replies are framed
+text, while `session --json` preserves the JSONL response protocol. Scripts that
+parse JSON must opt in. `spec`, `protocol`, and `completions` emit their documented
+artifact formats regardless of the data-output selection.
+
+The iOS discovery command and macOS/iOS provider choices are compiled only on
+macOS. Other hosts retain portable saved-snapshot tools and native-provider routing.

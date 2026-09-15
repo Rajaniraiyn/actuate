@@ -45,7 +45,11 @@ def main():
         assert '\\\"omitted_chars' not in delta
         compact_delta = json.loads(run('diff', a, b, '--format', 'compact'))
         assert compact_delta['text'] == delta and compact_delta['before_revision'] == 1
-        native_delta = json.loads(run('diff', a, b))
+        assert run('view', a) == run('view', a, '--format', 'text')
+        assert run('diff', a, b) == delta
+        assert json.loads(run('--json', 'view', a)) == before
+        assert not run('query', a, '--name', 'Find').lstrip().startswith('{')
+        native_delta = json.loads(run('diff', a, b, '--json'))
         assert native_delta['modified'][0]['reference'] == ref(2)
         invalid = subprocess.run([BIN, 'view', str(a), '--format', 'typo'], capture_output=True)
         assert invalid.returncode != 0

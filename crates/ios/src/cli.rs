@@ -3,6 +3,9 @@ use usage::{Cli, Subcommands};
 #[derive(Cli)]
 #[usage(bin = "unimation-ios", version)]
 struct App {
+    /// Opt in to JSON records or JSONL session responses.
+    #[usage(long, global)]
+    json: bool,
     #[usage(subcommand)]
     command: Command,
 }
@@ -22,15 +25,23 @@ enum Command {
     },
 }
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    match App::parse().command {
+    let app = App::parse();
+    let format = if app.json {
+        unimation::OutputFormat::Json
+    } else {
+        unimation::OutputFormat::Text
+    };
+    match app.command {
         Command::List { device_set } => {
             let mut sim = crate::simulator::Simctl::installed()?;
             if let Some(path) = device_set {
                 sim = sim.with_set(path);
             }
-            println!("{}", serde_json::to_string_pretty(&sim.list()?)?);
+            unimation::output::write_value(std::io::stdout().lock(), &sim.list()?, format)?;
             Ok(())
         }
-        Command::Session { udid, device_set } => crate::jsonl::run(&udid, &device_set),
+        Command::Session { udid, device_set } => {
+            crate::jsonl::run_formatted(&udid, &device_set, format)
+        }
     }
 }

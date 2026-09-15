@@ -876,3 +876,11 @@ exported command specification come from usage-rs. Installed resources do not
 change the grammar. Native APIs and persistent sessions remain in their provider
 crates; CLI routing maps shared arguments to typed provider requests. See
 [CLI configuration](docs/cli.md) for supported commands and current limitations.
+
+
+CLI data output defaults to plain text, including pipes. A single global format
+selection controls shared commands; `--json` opts into complete JSON and JSONL
+session responses. Typed library responses stay unchanged. A portable writer
+handles fallback record formatting with escaped controls, while trees and diffs
+retain specialized bounded views. Platform-only command variants are cfg-gated,
+so usage-rs omits them from parsing, help and completions on other hosts.
