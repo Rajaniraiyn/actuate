@@ -64,8 +64,7 @@ jobs:
           path: target/release-assets
       - uses: jdx/mise-action@v4
       - run: mise run setup
-      - run: mise run release:typescript release:sdist
-      - run: mise run release:manifest
+      - run: mise run release:packages
       - uses: actions/upload-artifact@v6
         with:
           name: release-assets

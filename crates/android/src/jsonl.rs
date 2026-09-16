@@ -48,8 +48,11 @@ pub fn dispatch<D: CommandTransport>(device: &mut Android<D>, mut request: Value
     }
     let request: session::Request =
         serde_json::from_value(request).map_err(|e| error("invalid_request", e, Effect::None))?;
-    serde_json::to_value(session::execute(device, request)?)
-        .map_err(|e| error("encode_response", e, Effect::None))
+    let response = session::execute(device, request)?;
+    if let session::Response::Capabilities(value) = response {
+        return Ok(value);
+    }
+    serde_json::to_value(response).map_err(|e| error("encode_response", e, Effect::None))
 }
 pub fn serve<D: CommandTransport>(
     device: &mut Android<D>,

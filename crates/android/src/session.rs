@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    Capabilities,
+    CursorState,
+    #[serde(alias = "discover")]
     Info,
     Apps,
     Launch {
@@ -29,6 +32,8 @@ pub enum Request {
 #[derive(Serialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum Response {
+    Capabilities(serde_json::Value),
+    CursorState(crate::cursor::CursorObservation),
     Info(DeviceInfo),
     Apps(crate::apps::LauncherActivities),
     Launch(crate::apps::LaunchReport),
@@ -38,6 +43,10 @@ pub enum Response {
 /// Binary frames remain bytes here. External transports choose their own framing.
 pub fn execute<D: CommandTransport>(device: &mut Android<D>, request: Request) -> Result<Response> {
     Ok(match request {
+        Request::Capabilities => Response::Capabilities(capabilities()),
+        Request::CursorState => {
+            Response::CursorState(crate::cursor::observe(&mut device.transport)?)
+        }
         Request::Info => Response::Info(device.info()?),
         Request::Apps => Response::Apps(device.launcher_activities()?),
         Request::Launch { component } => Response::Launch(device.launch(&component)?),
@@ -55,4 +64,9 @@ pub fn execute<D: CommandTransport>(device: &mut Android<D>, request: Request) -
         Request::Key { key } => Response::Receipt(device.key(key)?),
         Request::TypeAscii { text } => Response::Receipt(device.type_ascii(&text)?),
     })
+}
+
+/// Session capabilities, shared by the CLI and language adapters.
+pub fn capabilities() -> serde_json::Value {
+    serde_json::json!({"capture":"png_screencap","input":"android_input_command","observation":false,"hid":false,"device_overlay":false,"streaming":false,"cursor_observation":"surfaceflinger","transports":["usb","paired_wireless","legacy_tcp"],"adb_executable_required":false,"adb_server_required":false})
 }

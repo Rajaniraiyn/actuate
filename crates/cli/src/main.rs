@@ -780,7 +780,8 @@ fn run_host(
         Command::Session {} => {
             return session(format);
         }
-        Command::Completions { .. }
+        Command::Overlay { .. }
+        | Command::Completions { .. }
         | Command::Spec
         | Command::Protocol
         | Command::Diff { .. }
@@ -917,10 +918,7 @@ fn run_android(
         )?);
     }
     if matches!(command, Command::Capabilities) {
-        return Ok(emit_value(
-            &serde_json::json!({"capture":"png_screencap","input":"android_input_command","observation":false,"hid":false,"device_overlay":false,"streaming":false,"transports":["usb","paired_wireless"],"adb_executable_required":false,"adb_server_required":false}),
-            format,
-        )?);
+        return Ok(emit_value(&android::session::capabilities(), format)?);
     }
     if let Command::Capture {
         display,

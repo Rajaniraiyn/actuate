@@ -26,7 +26,7 @@ run = ["bun run build", "bun run typecheck", "bun test"]
 
 [tasks."test:python"]
 env.PYTHONPATH = "{{config_root}}/bindings/python"
-run = "uv run --project bindings/python --no-sync python -m unittest discover -s bindings/python/tests -v"
+run = ["uv run --project bindings/python --no-sync python -m unittest discover -s bindings/python/tests -v", "uv run --project bindings/python --no-sync mypy bindings/python/actuate"]
 
 [tasks.test]
 depends = ["test:rust", "test:typescript", "test:python"]
@@ -54,4 +54,8 @@ dir = "bindings/python"
 run = "uv build --sdist --out-dir ../../target/release-assets"
 
 [tasks."release:manifest"]
+run = "uv run --project bindings/python --no-sync python scripts/package-release.py --manifest"
+
+[tasks."release:packages"]
+depends = ["release:typescript", "release:sdist"]
 run = "uv run --project bindings/python --no-sync python scripts/package-release.py --manifest"

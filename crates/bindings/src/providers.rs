@@ -17,21 +17,36 @@ pub(crate) fn connect(options: ConnectOptions) -> Result<Box<dyn Dispatcher>> {
             "Desktop providers do not accept device options",
         ));
     }
+    let device_options_invalid = match options.provider {
+        Provider::AppleSimulator => options.credentials.is_some() || options.trust_first_connection,
+        Provider::AppleDevice => {
+            options.device_set.is_some()
+                || options.credentials.is_some()
+                || options.trust_first_connection
+        }
+        Provider::Android => options.device_set.is_some(),
+        _ => false,
+    };
+    if device_options_invalid {
+        return Err(NativeError::invalid_request(
+            "Connection options do not apply to this provider",
+        ));
+    }
     match options.provider {
         #[cfg(target_os = "windows")]
         Provider::Native | Provider::Windows => {
             let mut session = windows::WindowsSession::new()?;
-            Ok(Box::new(move |request| session.dispatch(request)))
+            Ok(Box::new(move |request: Value| session.dispatch(request)))
         }
         #[cfg(target_os = "macos")]
         Provider::Native | Provider::Macos => {
             let mut session = macos::session::MacSession::new();
-            Ok(Box::new(move |request| session.dispatch(request)))
+            Ok(Box::new(move |request: Value| session.dispatch(request)))
         }
         #[cfg(target_os = "linux")]
         Provider::Native | Provider::Linux => {
             let mut session = linux::LinuxSession::connect()?;
-            Ok(Box::new(move |request| session.dispatch(request)))
+            Ok(Box::new(move |request: Value| session.dispatch(request)))
         }
         #[cfg(target_os = "macos")]
         Provider::AppleSimulator => {
