@@ -1021,3 +1021,124 @@ upstream archive manifest. `scripts/prepare-deps.py` materializes them under ign
 `target/patched-deps`; no dependency source tree is checked in. See
 [dependency preparation](docs/dependencies.md). Cargo vendor snapshots are optional
 reproducible build artifacts, separate from these editable patches.
+
+
+## Shared motion and session lifetime
+
+The exported `unimation::motion` module now owns eased spatial paths, validated
+timing and drift-free bounded relative reports. Android HID, iOS simulator mouse
+and touch, and overlay drawing consume it. Physical iOS input remains unsupported.
+Idle bob is confined to visual rendering and does not move the native pointer.
+
+An Android HID pointer and observation adapter can share one connection through
+`CommandTransport` borrowing. JSONL sessions retain their connection until EOF;
+one-shot CLI commands do not yet attach to a named background session. A future
+shared session manager must make attachment, idle expiry, stop, and connection-loss
+state explicit, while refusing to replay uncertain input. See
+[composition details](docs/composition.md) and [cursor capture audit](docs/android-cursor-capture.md).
+
+### Native pointer targeting evidence
+
+Relative HID motion is measured in device counts, never display pixels.
+Acceleration and event cadence can change the endpoint. All targeted pointer
+actions must distinguish screenshot pixels, native display coordinates,
+window coordinates, and relative counts. Click and scroll targeting share
+the same position validation; drag endpoints additionally retain button
+state and require cleanup on failure. Screenshot resizing must carry its
+mapping rather than changing the meaning of coordinates implicitly.
+
+Android now offers an optional SurfaceFlinger cursor observer and bounded
+feedback movement. It derives position from sprite origin plus the actual
+native hotspot, rejects unsupported geometry, and checks geometry throughout
+movement. This is a composable observation capability on the same transport,
+not an assumption built into every HID backend. Other platforms must supply
+their own position evidence before offering equivalent targeting guarantees.
+
+### Optional linear native mouse session
+
+Android `hid::LinearPointer` borrows a persistent `Pointer` and temporarily
+leases the current user's acceleration/speed settings. It measures X/Y gain
+using opposite movements at different cadences, plans smooth movement in HID
+counts from that measurement, and verifies the native endpoint before clicks
+or targeted wheel events. Unsupported calibration fails instead of pretending
+that HID counts are pixels. This route changes settings for all mice belonging
+to that Android user and therefore must be selected explicitly. Checked close
+restores exact original values; Drop is best effort, not crash recovery.
+
+The route uses the same connection for observations, screenshots and input.
+Settings and display geometry are checked again before movement. Other user
+setting changes invalidate the calibration. Keep relative HID, calibrated HID,
+and absolute API injection as distinct composable capabilities. An absolute
+HID descriptor is not a portable replacement for Android's relative mouse
+classification. See `docs/android-validation.md` for source references and the
+measured Settings theme roundtrip.
+
+### Window-scoped macOS cursors and input validation
+
+`overlay::CursorScope` separates desktop visualization from native-window
+visualization. A window scope carries a native ID and owner PID. The macOS session
+selects it for SkyLight pointer actions; OS panels use the same mechanism when a
+native target window is available. Desktop scope is explicit, with no app-name
+heuristics deciding whether a cursor should float above unrelated windows.
+
+The macOS renderer uses optional `SLSAddWindowToWindowOrderingGroup`,
+`SLSRemoveFromOrderingGroup` and `SLSOrderWindow`. Host experiments showed that
+successful attachment does not survive every cross-process raise. Current code
+checks actual WindowServer order and repairs the relative placement when needed.
+It never raises the target and never substitutes an always-on-top window when
+attachment fails. This fallback can lag a compositor frame; a permanent native
+foreign-child attachment remains unresolved. Position tracking and rectangle
+clipping preserve the window-local visual anchor when the target moves.
+
+Window scope hides for unavailable, hidden or off-screen targets, avoids
+CanJoinAllSpaces, and uses MoveToActiveSpace when showing again. Dock AX overview
+notifications suppress both scopes during Mission Control, app Exposé and Show
+Desktop. Transient panels do not create independent overview tiles. Observer
+loss suppresses rendering until monitoring reconnects. This follows the Dock
+notification approach used by
+[yabai](https://github.com/asmvik/yabai/blob/master/src/mission_control.c), not a
+claim that these private notifications are a supported Apple contract. Initial
+observer startup during an already-active overview needs further validation.
+
+SkyLight input rechecks native ownership, on-screen membership and the
+window-local/desktop origin mapping immediately before dispatch. Drag packets
+recheck those conditions and stop with `Effect::Unknown` after a partial gesture,
+issuing the prepared button-up for cleanup. There remains a race between a check
+and the native dispatch. Successful dispatch does not establish app consumption.
+Visual callbacks follow dispatched drag coordinates without changing the input
+receipt; visual transport failure never authorizes an input retry.
+
+Live validation covered VS Code/Ghostty ordering, window movement by `(50, 50)`,
+hide/unhide and Mission Control. VS Code reached the requested `motion.rs` left /
+`geometry.rs` right split using an explicit foreground Quartz drag. Two SkyLight
+background drags did not create the split. No automatic global fallback was added.
+Multiple Spaces, mixed-DPI display crossings, full-screen transitions and Dock
+restart remain on the validation matrix. See [overlay details](crates/overlay/README.md).
+
+### Targeted drag validation, September 2026
+
+The native AppKit probe exposed a field-58 timestamp corruption in SkyLight event
+stamping. Routing now uses the public mouse event number, delivery-time uptime
+timestamps and explicit movement deltas. Drag waits use monotonic deadlines;
+interrupted gestures release at their last dispatched position.
+
+Correct packets alone did not fix native drag-and-drop. The probe reported no
+held mouse button during targeted delivery and ended native sessions early.
+Explicit foreground Quartz input completed the same drop. Keep background pointer
+tracking capability separate from verified native drag-and-drop capability, and
+verify application postconditions after dispatch. Never silently change to global
+input. See [the drag investigation](docs/macos-drag-validation.md) and its native
+probe for evidence and reproduction steps.
+
+### Upstream drag route audit
+
+The September 2026 [source audit](docs/macos-drag-reference-audit.md) found that
+Cua rejects background macOS drag at its public tool boundary, Pi defaults to
+foreground HID input, and Open Computer Use distinguishes targeted events from
+global native drag sessions. Dioxus's inspected mouse constructor has no dragged
+event variant. These projects do not establish universal background drag support.
+
+Key-window preparation through `SLPSPostEventRecordTo` remains an experimental
+provider option, with explicit routing effects and separate tests for native
+controls and native drag-and-drop. Gesture workers must own serialization and
+release cleanup; worker placement alone cannot repair missing held-button state.

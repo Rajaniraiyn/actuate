@@ -2,7 +2,7 @@
 use crate::OutputFormat;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -58,8 +58,44 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                 .as_array()
                 .map(|ids| ids.len().to_string())
                 .unwrap_or_else(|| "?".into());
+            let mut space_ids = BTreeSet::new();
+            let mut active_ids = BTreeSet::new();
+            if let Some(displays) = raw["space_topology"]["displays"].as_array() {
+                for display in displays {
+                    if let Some(id) = display["current_space_id"].as_u64() {
+                        active_ids.insert(id);
+                    }
+                }
+            }
+            if let Some(windows) = record["windows"].as_array() {
+                for window in windows {
+                    if let Some(ids) = window["spaces"]["ids"].as_array() {
+                        for id in ids.iter().filter_map(Value::as_u64) {
+                            space_ids.insert(id);
+                        }
+                    }
+                }
+            }
+            let spaces = if record.get("windows").is_some() {
+                format!(
+                    " spaces={}",
+                    if space_ids.is_empty() {
+                        "?".into()
+                    } else {
+                        space_ids
+                            .iter()
+                            .map(|id| {
+                                format!("{id}{}", if active_ids.contains(id) { "*" } else { "" })
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    }
+                )
+            } else {
+                String::new()
+            };
             text.push_str(&format!(
-                "{marker} {} {} [{}] {} windows={windows}{}{}\n",
+                "{marker} {} {} [{}] {} windows={windows}{spaces}{}{}\n",
                 record["pid"],
                 clean("name"),
                 clean("bundle_id"),
@@ -107,6 +143,7 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                     "active",
                     "activation_policy",
                     "visible_window_ids",
+                    "windows",
                     "hidden",
                     "system_ui",
                 ] {

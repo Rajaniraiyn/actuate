@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use unimation::{Effect, NativeError, Result};
 
 mod controller;
+pub mod idle;
 pub mod motion;
 pub mod shape;
 pub use controller::OverlayController;
@@ -21,9 +22,24 @@ pub enum CursorCommand {
     Configure {
         appearance: CursorAppearance,
     },
+    Scope {
+        scope: CursorScope,
+    },
     Hide,
     Show,
     Quit,
+}
+/// Where the compositor may present the cursor. Window identity includes its
+/// owner to reject stale IDs belonging to a different process.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CursorScope {
+    #[default]
+    Desktop,
+    Window {
+        window_id: u64,
+        pid: i32,
+    },
 }
 /// Portable visual preferences, independent of AppKit or input delivery.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,6 +48,7 @@ pub struct CursorAppearance {
     pub scale: f64,
     pub color: [f64; 3],
     pub motion: motion::MotionStyle,
+    pub idle: idle::IdleAppearance,
 }
 impl Default for CursorAppearance {
     fn default() -> Self {
@@ -39,12 +56,14 @@ impl Default for CursorAppearance {
             scale: 1.,
             color: [0.16, 0.18, 0.22],
             motion: Default::default(),
+            idle: Default::default(),
         }
     }
 }
 impl CursorAppearance {
     pub fn is_valid(&self) -> bool {
-        self.scale.is_finite()
+        self.idle.is_valid()
+            && self.scale.is_finite()
             && (0.5..=3.).contains(&self.scale)
             && self
                 .color
@@ -55,16 +74,6 @@ impl CursorAppearance {
 fn duration() -> u64 {
     250
 }
-pub fn interpolate(start: (f64, f64), end: (f64, f64), t: f64) -> (f64, f64) {
-    let t = t.clamp(0., 1.);
-    let u = 1. - t;
-    // Repeated endpoint controls produce a cubic Bézier with zero endpoint velocity.
-    let k = 3. * u * t * t + t * t * t;
-    (
-        start.0 + (end.0 - start.0) * k,
-        start.1 + (end.1 - start.1) * k,
-    )
-}
 
 impl CursorCommand {
     pub fn validate(&self) -> Result<()> {
@@ -74,12 +83,15 @@ impl CursorCommand {
             }
             Self::Click { x, y } => !x.is_finite() || !y.is_finite(),
             Self::Configure { appearance } => !appearance.is_valid(),
+            Self::Scope {
+                scope: CursorScope::Window { window_id, pid },
+            } => *window_id == 0 || *pid <= 0,
             _ => false,
         };
         if invalid {
             Err(NativeError {
                 code: "invalid_cursor_command".into(),
-                message: "Coordinates must be finite, duration_ms <= 10000, scale 0.5..=3, and RGB components 0..=1".into(),
+                message: "Coordinates must be finite, duration_ms <= 10000, scale 0.5..=3, and RGB components 0..=1, idle amplitude 0..=2 and period_ms 800..=10000".into(),
                 effect: Effect::None,
             })
         } else {
@@ -159,6 +171,32 @@ mod tests {
         );
     }
     #[test]
+    fn scope_preserves_wide_native_ids_and_rejects_invalid_owners() {
+        let scope = CursorScope::Window {
+            window_id: u64::from(u32::MAX) + 1,
+            pid: 42,
+        };
+        let command = CursorCommand::Scope { scope };
+        assert!(command.validate().is_ok());
+        assert_eq!(
+            serde_json::from_value::<CursorCommand>(serde_json::to_value(&command).unwrap())
+                .unwrap(),
+            command
+        );
+        for scope in [
+            CursorScope::Window {
+                window_id: 0,
+                pid: 42,
+            },
+            CursorScope::Window {
+                window_id: 1,
+                pid: 0,
+            },
+        ] {
+            assert!(CursorCommand::Scope { scope }.validate().is_err());
+        }
+    }
+    #[test]
     fn appearance_is_bounded_and_reduced_motion_is_typed() {
         let command: CursorCommand = serde_json::from_str(
             r#"{"op":"configure","appearance":{"motion":"reduced","scale":1.5}}"#,
@@ -201,11 +239,5 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code, "cursor_renderer_unavailable");
         assert!(matches!(error.effect, Effect::None));
-    }
-    #[test]
-    fn bezier_endpoints_and_clamping() {
-        assert_eq!(interpolate((0., 0.), (100., 50.), -1.), (0., 0.));
-        assert_eq!(interpolate((0., 0.), (100., 50.), 2.), (100., 50.));
-        assert_eq!(interpolate((0., 0.), (100., 50.), 0.5), (50., 25.));
     }
 }

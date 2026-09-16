@@ -987,8 +987,11 @@ name = "overlay"
 version = "0.1.0"
 dependencies = [
  "block2",
+ "libc",
  "objc2",
  "objc2-app-kit",
+ "objc2-application-services",
+ "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
  "serde",

@@ -80,6 +80,9 @@ impl OverlayController {
             writer: Some(writer),
         })
     }
+    pub fn scope(&mut self, scope: crate::CursorScope) -> Result<()> {
+        self.send(json!({"op":"scope","scope":scope}))
+    }
     pub fn is_running(&mut self) -> Result<bool> {
         match self.child.as_mut() {
             Some(child) => child

@@ -5,6 +5,7 @@ pub mod actions;
 pub mod diff;
 pub mod discovery;
 pub mod geometry;
+pub mod motion;
 pub mod presentation;
 pub mod query;
 pub mod wait;

@@ -22,6 +22,7 @@ fn error(
 pub mod capture;
 pub mod skylight;
 
+pub mod spaces;
 pub mod target;
 
 pub mod session;

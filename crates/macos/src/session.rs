@@ -162,28 +162,44 @@ impl MacSession {
             self.sky = Some(SkyLightInput::new()?);
         }
         let pulse = matches!(action, SkyLightPointerAction::Click { .. });
+        let visual_duration = if matches!(action, SkyLightPointerAction::Move { .. }) {
+            180
+        } else {
+            0
+        };
+        if let Some(overlay) = self.overlay.as_mut() {
+            self.overlay_error = overlay
+                .scope(overlay::CursorScope::Window {
+                    window_id: u64::from(target.window_id),
+                    pid: target.pid,
+                })
+                .err();
+        }
+        let overlay = &mut self.overlay;
+        let visual_error = &mut self.overlay_error;
         let result = self
             .sky
             .as_mut()
             .expect("provider initialized")
-            .pointer_at(target, action);
-        // Visual failure cannot turn dispatched input into a retryable action error.
-        if result
-            .as_ref()
-            .is_ok_and(|r| matches!(r.effect, Effect::Dispatched))
-            && let Some(overlay) = self.overlay.as_mut()
-        {
-            let point = self
-                .sky
+            .pointer_at_observed(target, action, |point| {
+                if let Some(overlay) = overlay.as_mut()
+                    && let Err(error) = overlay
+                        .move_to(point.x, point.y, visual_duration)
+                        .and_then(|()| overlay.show())
+                {
+                    *visual_error = Some(error);
+                }
+            });
+        // Visual failures never turn dispatched input into a retryable error.
+        if pulse
+            && result
                 .as_ref()
-                .and_then(SkyLightInput::last_pointer)
-                .expect("dispatched pointer");
-            let visual = if pulse {
-                overlay.click(point.x, point.y)
-            } else {
-                overlay.move_to(point.x, point.y, 180)
-            };
-            self.overlay_error = visual.and_then(|()| overlay.show()).err();
+                .is_ok_and(|r| matches!(r.effect, Effect::Dispatched))
+            && let Some(overlay) = self.overlay.as_mut()
+            && let Some(point) = self.sky.as_ref().and_then(SkyLightInput::last_pointer)
+            && let Err(error) = overlay.click(point.x, point.y)
+        {
+            self.overlay_error = Some(error);
         }
         result
     }
@@ -464,7 +480,7 @@ impl MacSession {
                 json!({"skylight":SkyLightInput::capabilities(),"snapshots_retained":32,"frames_retained":32,"quartz":{"global":true,"process":true,"consumption_verified":false}}),
             ),
             MacRequest::Displays {} => capture::displays().map(|v| json!(v)),
-            MacRequest::Windows {} => capture::windows().map(|v| json!(v)),
+            MacRequest::Windows {} => crate::spaces::windows().map(|v| json!(v)),
             MacRequest::Capture {
                 source,
                 path,

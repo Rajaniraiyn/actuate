@@ -147,6 +147,16 @@ impl SkyLightInput {
         target: &SkyLightTarget,
         action: SkyLightPointerAction,
     ) -> Result<Receipt> {
+        self.pointer_at_observed(target, action, |_| {})
+    }
+    /// Reports dispatched coordinates as input is delivered, for optional visuals.
+    /// The callback must not block or inject additional input.
+    pub fn pointer_at_observed(
+        &mut self,
+        target: &SkyLightTarget,
+        action: SkyLightPointerAction,
+        mut dispatched: impl FnMut(&Point),
+    ) -> Result<Receipt> {
         validate(target)?;
         if !Accessibility::is_trusted() {
             return Err(error(
@@ -155,6 +165,7 @@ impl SkyLightInput {
                 Effect::None,
             ));
         }
+        let dragging = matches!(action, SkyLightPointerAction::Drag { .. });
         let modifiers = match &action {
             SkyLightPointerAction::Move { modifiers }
             | SkyLightPointerAction::Click { modifiers, .. }
@@ -257,6 +268,7 @@ impl SkyLightInput {
                     duration_ms / steps,
                 ));
                 let mut end = target.clone();
+                let mut previous = target.desktop.clone();
                 for step in 1..=steps {
                     let fraction = step as f64 / steps as f64;
                     end.desktop = Point {
@@ -268,8 +280,20 @@ impl SkyLightInput {
                         y: target.window_local.y + end.desktop.y - target.desktop.y,
                     };
                     validate(&end)?;
+                    let event = make_mouse(dragged, native, &end, 1, 1.0)?;
+                    CGEvent::set_integer_value_field(
+                        Some(&event),
+                        CGEventField::MouseEventDeltaX,
+                        (end.desktop.x.round() - previous.x.round()) as i64,
+                    );
+                    CGEvent::set_integer_value_field(
+                        Some(&event),
+                        CGEventField::MouseEventDeltaY,
+                        (end.desktop.y.round() - previous.y.round()) as i64,
+                    );
+                    previous = end.desktop.clone();
                     events.push((
-                        make_mouse(dragged, native, &end, 1, 1.0)?,
+                        event,
                         if step == steps {
                             0
                         } else {
@@ -280,10 +304,56 @@ impl SkyLightInput {
                 events.push((make_mouse(up, native, &end, 1, 0.0)?, 0));
             }
         }
+        // Prepared packets must receive delivery-time timestamps, not their
+        // allocation times. Use a native timestamp plus monotonic elapsed time.
+        let mut uptime = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // CLOCK_UPTIME_RAW uses mach_absolute_time, excluding sleep, and returns
+        // nanoseconds without deprecated Mach bindings or allocation per packet.
+        if unsafe { libc::clock_gettime(libc::CLOCK_UPTIME_RAW, &mut uptime) } != 0 {
+            return Err(error(
+                "event_clock",
+                "Native event clock unavailable",
+                Effect::None,
+            ));
+        }
+        let base = (uptime.tv_sec as u64)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(uptime.tv_nsec as u64);
+        let started = std::time::Instant::now();
+        let timestamp =
+            || base.saturating_add(started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64);
         // Recheck ownership after preparation and immediately before any input.
         // Caller lifecycle tokens must still guard reuse of an ID by the same PID.
         validate_owner(target)?;
+        let mut deadline = started;
         for (index, (event, delay)) in events.iter().enumerate() {
+            if dragging
+                && index > 0
+                && let Err(mut failure) = validate_owner(target)
+            {
+                // A gesture may already have pressed a button. Send only its
+                // prepared release, then stop; never continue a stale path.
+                if let Some((release, _)) = events.last() {
+                    // Release where the last packet went, not at the planned
+                    // destination of an interrupted gesture.
+                    if let Some(last) = &self.last_target {
+                        CGEvent::set_location(Some(release), cg(&last.desktop));
+                        let local = Point {
+                            x: target.window_local.x + last.desktop.x - target.desktop.x,
+                            y: target.window_local.y + last.desktop.y - target.desktop.y,
+                        };
+                        unsafe { (self.symbols.local)(&**release, cg(&local)) };
+                    }
+                    CGEvent::set_timestamp(Some(release), timestamp());
+                    unsafe { (self.symbols.post)(target.pid, &**release) };
+                }
+                failure.effect = Effect::Unknown;
+                return Err(failure);
+            }
+            CGEvent::set_timestamp(Some(event), timestamp());
             // The API has no acknowledgement; it reports dispatch only.
             unsafe { (self.symbols.post)(target.pid, &**event) };
             let position = CGEvent::location(Some(event));
@@ -294,8 +364,16 @@ impl SkyLightInput {
                     y: position.y,
                 },
             ));
+            dispatched(
+                &self
+                    .last_target
+                    .as_ref()
+                    .expect("dispatched target")
+                    .desktop,
+            );
             if index + 1 < events.len() && *delay != 0 {
-                std::thread::sleep(std::time::Duration::from_millis(*delay));
+                deadline += std::time::Duration::from_millis(*delay);
+                std::thread::sleep(deadline.saturating_duration_since(std::time::Instant::now()));
             }
         }
         Ok(Receipt {
@@ -304,19 +382,23 @@ impl SkyLightInput {
         })
     }
     fn stamp(&self, event: &CGEvent, target: &SkyLightTarget, group: i64) {
-        // Private fields 51/58 carry native window number and click-group ID.
-        // Public equivalents identify both windows-under-pointer and target PID.
+        // Only the target-window field remains private. Field 58 is a native
+        // timestamp alias on the tested host, NOT a gesture identifier.
+        CGEvent::set_integer_value_field(Some(event), CGEventField::MouseEventNumber, group);
+        CGEvent::set_integer_value_field(
+            Some(event),
+            CGEventField::EventTargetUnixProcessID,
+            i64::from(target.pid),
+        );
+        for field in [
+            CGEventField::MouseEventWindowUnderMousePointer,
+            CGEventField::MouseEventWindowUnderMousePointerThatCanHandleThisEvent,
+        ] {
+            CGEvent::set_integer_value_field(Some(event), field, i64::from(target.window_id));
+        }
         unsafe {
             (self.symbols.local)(event, cg(&target.window_local));
-            for (field, value) in [
-                (40, i64::from(target.pid)),
-                (51, i64::from(target.window_id)),
-                (58, group),
-                (91, i64::from(target.window_id)),
-                (92, i64::from(target.window_id)),
-            ] {
-                (self.symbols.field)(event, field, value);
-            }
+            (self.symbols.field)(event, 51, i64::from(target.window_id));
         }
     }
 }
@@ -363,6 +445,42 @@ fn validate_owner(target: &SkyLightTarget) -> Result<()> {
         || number("kCGWindowOwnerPID") != Some(i64::from(target.pid))
     {
         return Err(invalid());
+    }
+    let get = |name: &str| {
+        let key = CFString::from_str(name);
+        // SAFETY: borrowed CF values remain owned by the retained dictionary.
+        let raw = unsafe { dictionary.value((&*key as *const CFString).cast()) };
+        if raw.is_null() {
+            None
+        } else {
+            Some(unsafe { &*raw.cast::<CFType>() })
+        }
+    };
+    if !get("kCGWindowIsOnscreen")
+        .and_then(|v| v.downcast_ref::<objc2_core_foundation::CFBoolean>())
+        .is_some_and(|v| v.value())
+    {
+        return Err(error(
+            "target_not_on_screen",
+            "Target is minimized, hidden, or on another Space",
+            Effect::None,
+        ));
+    }
+    let bounds = get("kCGWindowBounds")
+        .and_then(|v| v.downcast_ref::<CFDictionary>())
+        .ok_or_else(invalid)?;
+    let mut rect = objc2_core_foundation::CGRect::default();
+    // SAFETY: retained dictionary and initialized output storage.
+    if !unsafe {
+        objc2_core_graphics::CGRectMakeWithDictionaryRepresentation(Some(bounds), &mut rect)
+    } || (target.desktop.x - target.window_local.x - rect.origin.x).abs() > 0.5
+        || (target.desktop.y - target.window_local.y - rect.origin.y).abs() > 0.5
+    {
+        return Err(error(
+            "stale_geometry",
+            "Target moved since coordinates were resolved; capture or resolve it again",
+            Effect::None,
+        ));
     }
     Ok(())
 }
@@ -443,6 +561,43 @@ fn validate(target: &SkyLightTarget) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn routing_preserves_timestamp_and_uses_public_mouse_event_number() {
+        let Some(symbols) = symbols() else {
+            return;
+        };
+        let provider = SkyLightInput {
+            symbols,
+            last_target: None,
+        };
+        let event = CGEvent::new_mouse_event(
+            None,
+            CGEventType::LeftMouseDown,
+            CGPoint::new(20., 30.),
+            CGMouseButton::Left,
+        )
+        .unwrap();
+        CGEvent::set_timestamp(Some(&event), 987654321000);
+        provider.stamp(
+            &event,
+            &SkyLightTarget {
+                pid: 42,
+                window_id: 99,
+                desktop: Point { x: 20., y: 30. },
+                window_local: Point { x: 10., y: 10. },
+            },
+            7,
+        );
+        assert_eq!(CGEvent::timestamp(Some(&event)), 987654321000);
+        assert_eq!(
+            CGEvent::integer_value_field(Some(&event), CGEventField::MouseEventNumber),
+            7
+        );
+        assert_eq!(
+            CGEvent::integer_value_field(Some(&event), CGEventField::EventTargetUnixProcessID),
+            42
+        );
+    }
     #[test]
     fn validation_preserves_negative_desktop_positions() {
         let mut target = SkyLightTarget {

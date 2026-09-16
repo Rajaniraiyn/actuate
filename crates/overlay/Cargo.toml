@@ -10,11 +10,18 @@ serde.workspace = true
 serde_json.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
-objc2-app-kit = {version="0.3.2",default-features=false,features=["std","NSApplication","NSRunningApplication","NSWindow","NSPanel","NSView","NSColor","NSBezierPath","NSGraphics","NSGraphicsContext","NSShadow","NSResponder","objc2-core-foundation"]}
-objc2-foundation = {version="0.3.2",default-features=false,features=["std","NSTimer","NSDate","NSRunLoop","NSGeometry","NSObject","block2"]}
-objc2-core-graphics = {version="0.3.2",default-features=false,features=["std","CGDirectDisplay"]}
+objc2-app-kit = {version="0.3.2",default-features=false,features=["std","NSApplication","NSRunningApplication","NSWindow","NSPanel","NSView","NSColor","NSBezierPath","NSGraphics","NSGraphicsContext","NSShadow","NSResponder","libc","objc2-core-foundation"]}
+objc2-foundation = {version="0.3.2",default-features=false,features=["std","NSTimer","NSDate","NSRunLoop","NSGeometry","NSObject","NSArray","NSString","block2"]}
+objc2-core-graphics = {version="0.3.2",default-features=false,features=["std","CGDirectDisplay","CGWindow","CGGeometry"]}
+libc = "0.2"
+objc2-core-foundation = "0.3.2"
 block2 = "0.6.2"
 
 [[bin]]
 name = "unimation-overlay"
 path = "src/main.rs"
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-application-services]
+version = "0.3.2"
+default-features = false
+features = ["std", "AXUIElement", "AXError", "HIServices", "libc"]

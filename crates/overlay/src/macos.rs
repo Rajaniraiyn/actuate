@@ -1,3 +1,6 @@
+mod attachment;
+mod overview;
+use overlay::CursorScope;
 use overlay::{
     CursorAppearance, CursorCommand as Command,
     motion::{self, MotionStyle},
@@ -30,11 +33,13 @@ define_class!(
         #[unsafe(method(drawRect:))]
         fn draw(&self,_rect:NSRect){
             let visual = self.ivars();
+            if let Some(clip) = visual.clip.get() { NSBezierPath::clipRect(clip); }
             let appearance = visual.appearance.borrow();
             let scale = appearance.scale;
+            let idle = visual.idle_offset.get();
             let point = |x: f64, y: f64| NSPoint::new(
-                TIP.0 + (x - HOTSPOT.0) * UNIT * scale,
-                TIP.1 - (y - HOTSPOT.1) * UNIT * scale,
+                TIP.0 + idle.0 + (x - HOTSPOT.0) * UNIT * scale,
+                TIP.1 + idle.1 - (y - HOTSPOT.1) * UNIT * scale,
             );
             let [r,g,b] = appearance.color;
             let pulse = visual.pulse.get();
@@ -73,7 +78,9 @@ define_class!(
 #[derive(Default)]
 struct Visual {
     appearance: RefCell<CursorAppearance>,
+    clip: std::cell::Cell<Option<NSRect>>,
     pulse: std::cell::Cell<Option<f64>>,
+    idle_offset: std::cell::Cell<(f64, f64)>,
 }
 type Motion = ((f64, f64), (f64, f64), Instant, Duration);
 struct State {
@@ -84,6 +91,15 @@ struct State {
     motion: Option<Motion>,
     pulse: Option<Instant>,
     last_origin: Option<(f64, f64)>,
+    last_activity: Instant,
+    visible: bool,
+    scope: CursorScope,
+    groups: Option<attachment::Groups>,
+    overview: Option<overview::Overview>,
+    overview_retry: Instant,
+    attached: bool,
+    target_origin: Option<(f64, f64)>,
+    target_bounds: Option<objc2_core_foundation::CGRect>,
 }
 fn tick() {
     let mtm = MainThreadMarker::new().expect("overlay timer runs on main thread");
@@ -92,6 +108,21 @@ fn tick() {
         let Some(s) = state.as_mut() else {
             return;
         };
+        if let Some(window) = attachment::window(s.scope) {
+            let origin = (window.bounds.origin.x, window.bounds.origin.y);
+            if let Some(old) = s.target_origin {
+                let delta = (origin.0 - old.0, origin.1 - old.1);
+                s.position.0 += delta.0;
+                s.position.1 += delta.1;
+                if let Some((ref mut start, ref mut end, _, _)) = s.motion {
+                    start.0 += delta.0;
+                    start.1 += delta.1;
+                    end.0 += delta.0;
+                    end.1 += delta.1;
+                }
+            }
+            s.target_origin = Some(origin);
+        }
         for _ in 0..256 {
             let command = match s.receiver.try_recv() {
                 Ok(c) => c,
@@ -105,6 +136,7 @@ fn tick() {
                 Command::Move { x, y, duration_ms }
                     if x.is_finite() && y.is_finite() && duration_ms <= 10000 =>
                 {
+                    s.last_activity = Instant::now();
                     if duration_ms == 0
                         || s.view.ivars().appearance.borrow().motion == MotionStyle::Reduced
                     {
@@ -120,11 +152,13 @@ fn tick() {
                     ));
                 }
                 Command::Click { x, y } if x.is_finite() && y.is_finite() => {
+                    s.last_activity = Instant::now();
                     s.position = (x, y);
                     s.motion = None;
                     s.pulse = Some(Instant::now());
                 }
                 Command::Configure { appearance } if appearance.is_valid() => {
+                    s.last_activity = Instant::now();
                     if appearance.motion == MotionStyle::Reduced {
                         if let Some((_, end, _, _)) = s.motion.take() {
                             s.position = end;
@@ -134,10 +168,24 @@ fn tick() {
                     *s.view.ivars().appearance.borrow_mut() = appearance;
                     s.view.setNeedsDisplay(true);
                 }
+                Command::Scope { scope } => {
+                    if scope != s.scope {
+                        s.panel.orderOut(None);
+                        if let Some(groups) = &s.groups {
+                            groups.detach(s.panel.windowNumber() as u32);
+                        }
+                        s.scope = scope;
+                        s.attached = false;
+                        s.target_origin = attachment::window(scope)
+                            .map(|w| (w.bounds.origin.x, w.bounds.origin.y));
+                    }
+                }
                 Command::Show => {
-                    s.panel.orderFrontRegardless();
+                    s.visible = true;
+                    s.last_activity = Instant::now();
                 }
                 Command::Hide => {
+                    s.visible = false;
                     s.panel.orderOut(None);
                 }
                 Command::Quit => {
@@ -149,6 +197,79 @@ fn tick() {
                 }
             }
         }
+        if s.overview.as_ref().is_some_and(|o| !o.alive()) {
+            s.overview = None;
+        }
+        if s.overview.is_none() && s.overview_retry.elapsed() >= Duration::from_secs(1) {
+            s.overview = overview::Overview::observe();
+            s.overview_retry = Instant::now();
+        }
+        // Missing overview monitoring suppresses visuals until it reconnects.
+        let overview = s.overview.as_ref().is_none_or(|o| o.active());
+        match s.scope {
+            CursorScope::Desktop => {
+                s.target_bounds = None;
+                if s.panel.level() != 1000 {
+                    s.panel.setLevel(1000);
+                }
+                let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::Transient
+                    | NSWindowCollectionBehavior::IgnoresCycle;
+                if s.panel.collectionBehavior() != behavior {
+                    s.panel.setCollectionBehavior(behavior);
+                }
+                if s.visible && !overview && !s.panel.isVisible() {
+                    s.panel.orderFrontRegardless();
+                }
+            }
+            CursorScope::Window { window_id, .. } => {
+                if let (Ok(window_id), Some(window)) =
+                    (u32::try_from(window_id), attachment::window(s.scope))
+                {
+                    s.target_bounds = Some(window.bounds);
+                    if s.panel.level() != window.level {
+                        s.panel.setLevel(window.level);
+                        s.attached = false;
+                    }
+                    let behavior = NSWindowCollectionBehavior::Transient
+                        | NSWindowCollectionBehavior::IgnoresCycle
+                        | NSWindowCollectionBehavior::FullScreenAuxiliary
+                        | NSWindowCollectionBehavior::MoveToActiveSpace;
+                    if s.panel.collectionBehavior() != behavior {
+                        s.panel.setCollectionBehavior(behavior);
+                        s.attached = false;
+                    }
+                    if s.visible && window.on_screen && !overview {
+                        if !s.panel.isVisible()
+                            || !s.attached
+                            || !attachment::correctly_ordered(
+                                window_id,
+                                s.panel.windowNumber() as u32,
+                            )
+                        {
+                            s.panel.orderWindow_relativeTo(
+                                NSWindowOrderingMode::Above,
+                                window_id as isize,
+                            );
+                            s.attached = s.groups.as_ref().is_some_and(|g| {
+                                g.attach(window_id, s.panel.windowNumber() as u32)
+                            });
+                        }
+                        if !s.attached {
+                            s.panel.orderOut(None);
+                        }
+                    } else {
+                        s.panel.orderOut(None);
+                    }
+                } else {
+                    s.panel.orderOut(None);
+                    s.attached = false;
+                }
+            }
+        }
+        if overview {
+            s.panel.orderOut(None);
+        }
         if let Some((start, end, time, duration)) = s.motion {
             let t = if duration.is_zero() {
                 1.
@@ -158,10 +279,23 @@ fn tick() {
             s.position = motion::sample(start, end, t, s.view.ivars().appearance.borrow().motion);
             if t >= 1. {
                 s.motion = None;
+                s.last_activity = Instant::now();
             }
         }
         let main = objc2_core_graphics::CGDisplayBounds(objc2_core_graphics::CGMainDisplayID());
         let (x, y) = appkit_origin(s.position.0, s.position.1, main.size.height);
+        let clip = s.target_bounds.map(|bounds| {
+            NSRect::new(
+                NSPoint::new(
+                    bounds.origin.x - x,
+                    main.size.height - bounds.origin.y - bounds.size.height - y,
+                ),
+                NSSize::new(bounds.size.width, bounds.size.height),
+            )
+        });
+        if s.view.ivars().clip.replace(clip) != clip {
+            s.view.setNeedsDisplay(true);
+        }
         if s.last_origin != Some((x, y)) {
             s.panel.setFrameOrigin(NSPoint::new(x, y));
             s.last_origin = Some((x, y));
@@ -170,12 +304,26 @@ fn tick() {
             let t = time.elapsed().as_secs_f64() / 0.45;
             if t >= 1. || s.view.ivars().appearance.borrow().motion == MotionStyle::Reduced {
                 s.pulse = None;
+                s.last_activity = Instant::now();
                 s.view.ivars().pulse.set(None);
             } else {
                 s.view.ivars().pulse.set(Some(t));
             }
             s.view.setNeedsDisplay(true);
         } else if s.view.ivars().pulse.replace(None).is_some() {
+            s.view.setNeedsDisplay(true);
+        }
+        // Decoration is view-local. The panel origin, semantic target and click
+        // ring remain anchored to position; no input provider sees this offset.
+        let offset = if s.visible && s.motion.is_none() && s.pulse.is_none() {
+            let appearance = s.view.ivars().appearance.borrow();
+            appearance
+                .idle
+                .offset(s.last_activity.elapsed().as_secs_f64(), appearance.motion)
+        } else {
+            (0., 0.)
+        };
+        if s.view.ivars().idle_offset.replace(offset) != offset {
             s.view.setNeedsDisplay(true);
         }
     });
@@ -233,6 +381,15 @@ pub fn run() {
             motion: None,
             pulse: None,
             last_origin: None,
+            last_activity: Instant::now(),
+            visible: false,
+            scope: CursorScope::Desktop,
+            groups: attachment::Groups::load(),
+            overview: overview::Overview::observe(),
+            overview_retry: Instant::now(),
+            attached: false,
+            target_origin: None,
+            target_bounds: None,
         })
     });
     let block = RcBlock::new(|_timer: NonNull<NSTimer>| tick());

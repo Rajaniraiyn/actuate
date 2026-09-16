@@ -370,6 +370,8 @@ impl Discover for Accessibility {
         let apps = crate::discovery::applications()?;
         let active_pid = crate::discovery::frontmost_pid();
         let visible_windows = crate::discovery::visible_windows();
+        let window_context = crate::spaces::windows();
+        let space_topology = crate::spaces::SpaceQuery::new().and_then(|q| q.topology());
         // Query native AXFrontmost per app. AppKit caches isActive until its run
         // loop runs, which is not guaranteed in a synchronous embedding host.
         let mut applications = vec![];
@@ -429,12 +431,13 @@ impl Discover for Accessibility {
             );
             applications.push(json!({"pid":pid,"name":app.localizedName().map(|s|s.to_string()),
                 "bundle_id":bundle,"activation_policy":policy,"hidden":app.isHidden(),"terminated":app.isTerminated(),"system_ui":system_ui,"visible_window_ids":visible_windows.as_ref().ok().map(|windows|windows.get(&pid).cloned().unwrap_or_default()),"active":active_pid.map(|front|front==pid), "ax_frontmost":frontmost.as_ref().ok(),
-                "active_error":frontmost.err()}));
+                "active_error":frontmost.err(),
+                "windows":window_context.as_ref().ok().map(|ws|ws.iter().filter(|w|w.geometry.pid==i64::from(pid)).collect::<Vec<_>>())}));
         }
         Ok(
             json!({"session":self.session,"accessibility_trusted":Self::is_trusted(),
             "active_pid":active_pid,"ax_frontmost_pids":active_pids,
-            "window_error":visible_windows.err(),"active_state_source":"optional_process_manager_probe","application_list_source":"libproc_per_pid_appkit","applications":applications}),
+            "window_error":visible_windows.err(),"window_context_error":window_context.err(),"space_topology":space_topology.as_ref().ok(),"space_error":space_topology.err(),"active_state_source":"optional_process_manager_probe","application_list_source":"libproc_per_pid_appkit","applications":applications}),
         )
     }
 }
