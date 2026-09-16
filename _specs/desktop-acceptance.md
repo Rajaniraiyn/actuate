@@ -86,8 +86,8 @@ No live Windows or Linux UI acceptance result is claimed by these checks.
 
 ## Overlay acceptance
 
-Build the separate visual helper with `cargo build -p overlay`. Start
-`target/debug/actuate-overlay` or `target/debug/actuate-overlay.exe` and keep
+Build the CLI with `cargo build -p cli`. Start
+`target/debug/actuate overlay` or `target/debug/actuate.exe overlay` and keep
 its stdin open while sending one command per line. It displays feedback only;
 `click` in this protocol does not click an application.
 

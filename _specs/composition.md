@@ -137,7 +137,7 @@ to the Rust library, not a new CLI command or a claimed notification provider.
 
 `actuate::motion::MotionPlan` generates timed absolute samples;
 `RelativeMotionPlan` generates bounded integer HID reports with exact total counts.
-Both use the same eased Bézier geometry as the overlay. Coordinate units belong to
+Both use the same eased BÃ©zier geometry as the overlay. Coordinate units belong to
 the caller; Android mouse acceleration means HID counts are not screen pixels.
 Android and simulator mouse adapters expose `move_smooth`; simulator touch exposes
 `touch_path` with full normalized-coordinate validation before contact.
@@ -163,7 +163,7 @@ same configuration and motion geometry; the Windows renderer remains a stub.
 ## Desktop cursor providers
 
 `OverlayController` implements `CursorVisualization` independently of input traits.
-Start the native `actuate-overlay` executable with an explicit path and inject that
+Start the native `actuate overlay` subcommand with an explicit path and inject that
 controller wherever a visual provider is needed. The same typed commands configure
 appearance, desktop/window scope, movement, click feedback and visibility on macOS,
 Windows, Wayland and X11. A queued command is not a rendered-frame acknowledgement or

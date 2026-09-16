@@ -25,7 +25,7 @@ target/debug/actuate session --json
 | Process-directed click | `X11` | `linux.x11.send_event` | Synthetic `send_event` to one X window; many toolkits ignore it |
 | Window-targeted keys | Hyprland IPC | `linux.hyprland.send_shortcut` | `hl.dsp.send_shortcut`/`send_key_state` to a window that need not be focused |
 | Capture | `WaylandCapture`, `X11` | `linux.wayland.screencopy`, `screencopy_region`, `image_copy_capture`, `linux.x11.get_image` | Output, region and unoccluded toplevel frames as PNG |
-| Cursor visualization | `overlay::linux::LayerCursor` | in-process or `actuate-overlay` | Layer-shell overlay surface with an empty input region |
+| Cursor visualization | `overlay::linux::LayerCursor` | in-process or `actuate overlay` | Layer-shell overlay surface with an empty input region |
 
 Receipts report delivery, never consumption. `capabilities` reports which providers are
 connected; providers connect lazily on first use so a session without input never
@@ -127,7 +127,7 @@ stacked above the target covers it (`compositor::hyprland::stacking_above`, deri
 from Hyprland's tiers and client order). Geometry refreshes on Hyprland's event socket,
 so a workspace switch reveals or parks the glyph immediately, with a two-second poll as
 the fallback. The same renderer backs
-the standalone `actuate-overlay` executable through the JSONL protocol in the
+the standalone `actuate overlay` subcommand through the JSONL protocol in the
 [overlay README](../crates/overlay/README.md). Acknowledgements remain `queued`.
 
 ## Validation
