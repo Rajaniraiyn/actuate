@@ -46,7 +46,7 @@ struct FileStore {
     path: PathBuf,
 }
 impl FileStore {
-    fn open(path: &Path) -> Result<Self> {
+    fn open(#[cfg_attr(not(unix), allow(unused_variables))] path: &Path) -> Result<Self> {
         #[cfg(not(unix))]
         return Err(fail(
             "credential_store_unsupported",

@@ -3,13 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun ./node_modules/blume/bin/blume.mjs dev",
-    "build": "bun ./node_modules/blume/bin/blume.mjs build",
-    "preview": "bun ./node_modules/blume/bin/blume.mjs preview",
-    "validate": "bun ./node_modules/blume/bin/blume.mjs validate",
-    "audit": "bun ./node_modules/blume/bin/blume.mjs audit"
+    "dev": "bun --bun blume dev",
+    "build": "bun --bun blume build",
+    "preview": "bun --bun blume preview",
+    "validate": "bun --bun blume validate",
+    "audit": "bun --bun blume audit"
   },
   "packageManager": "bun@1.4.0",
-  "engines": { "bun": ">=1.4.0" },
-  "dependencies": { "blume": "1.7.0" }
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "dependencies": {
+    "blume": "1.7.0"
+  }
 }

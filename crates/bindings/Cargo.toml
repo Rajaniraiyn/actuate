@@ -1,0 +1,25 @@
+[package]
+name = "actuate-bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["android", "apple-device"]
+android = ["dep:android"]
+apple-device = ["ios/physical"]
+
+[dependencies]
+actuate.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ios.workspace = true
+android = { path = "../android", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { path = "../windows" }
+[target.'cfg(target_os = "macos")'.dependencies]
+macos.workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+linux.workspace = true

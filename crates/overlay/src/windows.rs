@@ -24,15 +24,15 @@ use windows_api::{
 };
 
 // Binary entry point. Native resources stay on the COM/UI thread.
-pub fn run() {
-    if std::env::args().nth(1).as_deref() == Some("--cursor-visibility-guard") {
+pub fn run(options: crate::RunOptions) {
+    if options.visibility_guard {
         if let Err(error) = cursor_guard::run() {
             eprintln!("Cursor visibility guard: {error}");
             std::process::exit(1);
         }
         return;
     }
-    if let Err(error) = run_native() {
+    if let Err(error) = run_native(options) {
         eprintln!("Windows cursor renderer: {error}");
         std::process::exit(1);
     }
@@ -316,28 +316,11 @@ fn guard_update(guard: &mut Option<cursor_guard::Guard>, hide: bool) -> Result<(
     }
     Ok(())
 }
-fn run_native() -> Result<()> {
+fn run_native(options: crate::RunOptions) -> Result<()> {
     unsafe {
         let _environment = Environment::new()?;
-        let mut policy = overlay::PhysicalCursorPolicy::Preserve;
-        let mut tracking = false;
-        for argument in std::env::args().skip(1) {
-            match argument.as_str() {
-                "--hide-cursor-within-scope" => {
-                    policy = overlay::PhysicalCursorPolicy::HideWithinScope
-                }
-                "--hide-cursor-while-visible" => {
-                    policy = overlay::PhysicalCursorPolicy::HideWhileVisible
-                }
-                "--track-physical-pointer" => tracking = true,
-                _ => {
-                    return Err(Error::new(
-                        windows_api::core::HRESULT(0x80070057_u32 as i32),
-                        "Unknown overlay option",
-                    ));
-                }
-            }
-        }
+        let policy = options.physical_cursor;
+        let tracking = options.tracking == crate::CursorTracking::PhysicalPointer;
         let mut guard = if policy == overlay::PhysicalCursorPolicy::Preserve {
             None
         } else {

@@ -7,7 +7,7 @@ Checked on this development Mac on 2026-09-15. These are observations on the ins
 - Calculator: observe native buttons, perform `AXPress` for `2 + 3 =`, and reobserve the display containing 5. Display text retains native direction marks.
 - Calculator references: a live button kept its reference across actions and observation. Another session rejected the reference.
 - Fixture: set Unicode `AXValue`, set boolean `AXFocused`, and read each value back.
-- Fixture: process-directed Quartz Unicode keyboard events entered `Hi🦀` in the focused field.
+- Fixture: process-directed Quartz Unicode keyboard events entered `HiðŸ¦€` in the focused field.
 - Fixture: global Quartz click invoked a button, and global movement plus scrolling reached the scroll view.
 - Protocol: unknown fields rejected before dispatch, request IDs echoed, invalid JSON recovered, foreign references rejected, default budgets applied, and node-limit truncation reported.
 
@@ -191,7 +191,7 @@ workspace, and compositor-seat input was dispatched only while that workspace wa
   and are divided by the monitor scale before use.
 - Semantic actions: `Click` on the button incremented the fixture counter twice, a
   misspelled action returned `unsupported` with no effect, `set_string` on the entry wrote
-  `Hi🦀` and `attribute Text.Text` read it back, `set_float` moved the slider and
+  `HiðŸ¦€` and `attribute Text.Text` read it back, `set_float` moved the slider and
   `wait_attribute` on `Value.CurrentValue` matched, and `observe_subtree` reflected the
   toggled check button.
 - Retained observations: `query` by role and name found the button, `diff` listed the
@@ -205,7 +205,7 @@ workspace, and compositor-seat input was dispatched only while that workspace wa
 - Capture: unoccluded toplevel capture through ext-image-copy-capture, output capture
   through wlr-screencopy and a region crop all produced PNG frames with geometry mappings;
   an image click with semantic mode returned `unsupported`.
-- Visual cursor: the in-process layer-shell renderer and the `actuate-overlay` helper
+- Visual cursor: the in-process layer-shell renderer and the `actuate overlay` helper
   both registered an overlay layer surface named `actuate-cursor` that `hyprctl layers`
   listed, and removed it on stop. A `grim` capture of the screen region around a helper
   `move`/`show`/`click` at 1151,551 showed the purple glyph with its white outline and the

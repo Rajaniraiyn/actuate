@@ -3,6 +3,7 @@
 This directory holds implementation notes, design research, protocol details,
 and test reports. Reader-facing documentation lives in [www/docs](../www/docs).
 
+- [Native bindings and releases](bindings.md)
 - [Provider composition](composition.md)
 - [Session protocol](session.md)
 - [Platform implementations](backends.md)

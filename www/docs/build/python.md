@@ -3,8 +3,20 @@ title: Python
 description: Inspect native apps with typed Python requests and context-managed sessions. Reuse observation options and preserve native errors and effects.
 ---
 
-> SDK preview: this guide defines the Python binding API. The package is not
-> implemented yet. Use the [session protocol](/automate/sessions) for integration today.
+## Install
+
+Download a compatible wheel or source package from
+[GitHub Releases](https://github.com/Rajaniraiyn/actuate/releases):
+
+```sh
+uv venv
+uv pip install ./actuate-0.1.0.tar.gz
+```
+
+Use the filename from your selected release. Python 3.10 or newer is required.
+The source package downloads a matching prebuilt wheel during installation and
+verifies its checksum. It does not need a Rust compiler. Set `GH_TOKEN` for private
+release access. A downloaded wheel can also be installed directly with uv.
 
 ## Open a session
 
@@ -91,3 +103,21 @@ repeating the action. Cancelling an await does not undo an action already sent.
 
 See [errors and effects](/guides/errors) and
 [targeting](/automate/targeting) for recovery and reference ownership.
+
+## Platform operations and extensions
+
+`session.request()` exposes the selected provider's full session protocol,
+including platform-specific shell, window, device, and cursor operations.
+
+```python
+state = session.request({"op": "taskbar_state"})
+```
+
+This operation is Windows-specific. Other providers report their own supported
+operations and structured errors. Use `Operation(request, parse)` with
+`session.run()` to define a typed extension. `Actuate.from_transport()` accepts
+an implementation of the `Transport` protocol and ordered middleware.
+
+Native calls release the GIL and execute on the session's dedicated worker.
+The asynchronous client offloads waiting from the event loop. Closing it waits
+for in-flight work, including work whose caller stopped awaiting it.

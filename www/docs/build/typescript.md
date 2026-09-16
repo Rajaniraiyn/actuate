@@ -3,8 +3,21 @@ title: TypeScript
 description: Use typed requests and asynchronous sessions to inspect native apps from TypeScript. Reuse observation options and handle native action errors.
 ---
 
-> SDK preview: this guide defines the TypeScript binding API. The package is not
-> implemented yet. Use the [session protocol](/automate/sessions) for integration today.
+## Install
+
+Download the TypeScript package archive from
+[GitHub Releases](https://github.com/Rajaniraiyn/actuate/releases), then install it
+with Bun:
+
+```sh
+bun add ./actuate-0.1.0.tgz
+bun pm trust actuate
+```
+
+Use the filename from your selected release. The install hook downloads that
+version's native addon and verifies its checksum. If lifecycle scripts are
+disabled, run `bun run --cwd node_modules/actuate install-native` explicitly.
+Set `GH_TOKEN` when accessing a private release.
 
 ## Open a session
 
@@ -87,3 +100,23 @@ before use because their types depend on the provider.
 
 See [errors and effects](/guides/errors) for retry behavior and
 [targeting](/automate/targeting) for reference and coordinate rules.
+
+## Platform operations and extensions
+
+`session.request()` exposes the selected provider's full session protocol,
+including platform-specific shell, window, device, and cursor operations. It
+returns `Json`; narrow the result before reading provider-specific fields.
+
+```typescript
+const state = await session.request({ op: "taskbar_state" });
+```
+
+This operation is Windows-specific. Unsupported operations retain the provider's
+structured error. Use `defineOperation({ request, parse })` with `session.run()`
+to add a typed operation whose input and result types are inferred from the two
+functions. `Actuate.fromTransport(transport, { middleware })` accepts a custom
+transport. Middleware runs in array order and results unwind in reverse order.
+
+Calls within a session execute in invocation order. `close()` waits for prior
+requests and rejects new ones. Native result fields retain their protocol names,
+including `traversal_complete` and `parameterized_attributes`.

@@ -17,8 +17,8 @@ separate route. Check [platform coverage](/platforms) before choosing a route.
 
 ## Show a soft cursor
 
-The optional `actuate-overlay` binary renders the soft cursor. A session starts
-it through `cursor_overlay` with an explicit executable path. `cursor` commands
+The `actuate overlay` subcommand renders the soft cursor in a separate process.
+A session starts it through `cursor_overlay` with the path to the `actuate` executable. `cursor` commands
 control its appearance and motion where supported.
 
 The renderer can use window or display scope. Window scope follows the chosen
@@ -41,5 +41,13 @@ Cursor motion, idle animation, and click ripples share settings across renderers
 Reduced motion suppresses ornamental movement. A queued visual update is not a
 render acknowledgement or proof that the app consumed input.
 
-See the [overlay specification](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/windows-overlay.md)
+See the [overlay specification](https://github.com/Rajaniraiyn/actuate/blob/main/_specs/windows-overlay.md)
 for Windows command shapes and the [error guide](/guides/errors) for input receipts.
+
+## Renderer lifecycle
+
+The renderer uses the same executable as the CLI. Its separate process owns the
+native GUI event loop and exits when the session closes its input pipe. This
+keeps AppKit on a main thread and releases renderer resources independently of
+the host application. Windows cursor hiding also uses a visibility guard that
+restores the pointer if the renderer stops responding.

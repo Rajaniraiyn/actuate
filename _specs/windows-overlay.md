@@ -27,8 +27,8 @@ The command transport acknowledges queuing, not compositor presentation. Diagnos
 Build on Windows:
 
 ```powershell
-cargo build -p overlay
-.\target\debug\actuate-overlay.exe
+cargo build -p cli
+.\target\debug\actuate.exe overlay
 ```
 
 Paste individual commands while keeping stdin open:

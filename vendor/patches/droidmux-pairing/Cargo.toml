@@ -1,0 +1,41 @@
+[package]
+name = "droidmux-pairing"
+description = "Native Android 11+ wireless debugging pairing and TLS for DroidMux"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["DroidMux contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/poapoauu/DroidMux"
+publish = true
+documentation = "https://docs.rs/droidmux-pairing"
+
+[dependencies]
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+adb-auth = { package = "droidmux-auth", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-client = { package = "droidmux-client", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-protocol = { package = "droidmux-protocol", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-transport = { package = "droidmux-transport", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-transport-tcp = { package = "droidmux-transport-tcp", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+aes-gcm = { version = "0.10.3", features = ["zeroize"] }
+async-trait = "0.1.91"
+bytes = "1.12.1"
+curve25519-dalek = { version = "4.1.3", features = ["rand_core", "zeroize"] }
+hkdf = "0.12.4"
+rand = "0.8.7"
+rcgen = { version = "0.13.2", default-features = false, features = ["pem", "ring", "zeroize"] }
+rustls = { version = "0.23.35", default-features = false, features = ["ring", "std"] }
+secrecy = "0.10.3"
+sha2 = "0.10.9"
+subtle = "2.6.1"
+thiserror = "2.0.19"
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
+tokio = { version = "1.53.1", features = ["full"] }
+zeroize = "1.9.0"
+
+[dev-dependencies]
+adb-shell = { package = "droidmux-shell", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+
+
+
+[workspace]

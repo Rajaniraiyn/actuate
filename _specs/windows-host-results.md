@@ -67,7 +67,6 @@ snapshot. The suite does not turn those observations into complete-tree claims.
 Run from the repository:
 
 ```powershell
-python scripts/prepare-deps.py
 cargo build -p cli --no-default-features -p overlay
 python tests/windows_e2e.py
 ```

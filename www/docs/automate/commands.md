@@ -60,6 +60,11 @@ actuate completions zsh
 Use the [session protocol](/automate/sessions) to inspect references and perform
 actions within the process that owns them.
 
+## Cursor renderer
+
+`actuate overlay` reads cursor commands from stdin. Sessions manage its lifecycle
+through `cursor_overlay`. See [input and cursors](/guides/input-and-cursors).
+
 ## Output
 
 Text is the default. `--json` returns structured output. `--format compact`

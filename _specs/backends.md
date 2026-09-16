@@ -12,7 +12,7 @@ The Swift source under `native/macos` is a disposable test app only. It is not l
 
 Implemented extensions include role/name/native-attribute queries, field-level observation diffs, parameterized attribute reads, bounded attribute polling, physical key chords, pointer buttons/counts/modifiers/drag, native window lookup and hit-testing. The default capture route uses ScreenCaptureKit still screenshots on macOS 14+; the executable route is explicit. Frame mappings include native bounds, output pixel dimensions and a geometry fingerprint. SkyLight uses dynamically loaded symbols and window-local packets. See [its contract and limits](skylight.md).
 
-The optional `actuate-overlay` executable owns its AppKit run loop and renders a separate cursor. `MacSession` can start it from an explicit path and queue the last successful SkyLight pointer position after dispatch. It remains optional; queue and render status are separate from input receipts. See [cursor research](reference-cursor-notes.md) for upstream patterns and their limitations.
+The optional `actuate overlay` subcommand owns its AppKit run loop and renders a separate cursor. `MacSession` can start it from an explicit path and queue the last successful SkyLight pointer position after dispatch. It remains optional; queue and render status are separate from input receipts. See [cursor research](reference-cursor-notes.md) for upstream patterns and their limitations.
 
 Next work:
 

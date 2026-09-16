@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["target/patched-deps/droidmux-pairing", "target/patched-deps/droidmux-shell", "target/patched-deps/droidmux-client"]
+exclude = ["vendor/patches/droidmux-pairing", "vendor/patches/droidmux-shell", "vendor/patches/droidmux-client"]
 resolver = "2"
 
 [workspace.package]
@@ -21,6 +21,6 @@ overlay = { path = "crates/overlay" }
 linux = { path = "crates/linux" }
 
 [patch."https://github.com/poapoauu/DroidMux"]
-droidmux-pairing = { path = "target/patched-deps/droidmux-pairing" }
-droidmux-shell = { path = "target/patched-deps/droidmux-shell" }
-droidmux-client = { path = "target/patched-deps/droidmux-client" }
+droidmux-pairing = { path = "vendor/patches/droidmux-pairing" }
+droidmux-shell = { path = "vendor/patches/droidmux-shell" }
+droidmux-client = { path = "vendor/patches/droidmux-client" }

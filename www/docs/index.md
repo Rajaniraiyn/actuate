@@ -30,7 +30,7 @@ in one session.
 | --- | --- |
 | [Rust](/build/rust) | Available from source |
 | [CLI](/automate/commands) and [sessions](/automate/sessions) | Available from source |
-| [TypeScript](/build/typescript) and [Python](/build/python) | SDK previews |
+| [TypeScript](/build/typescript) and [Python](/build/python) | Available from source and release assets |
 | [MCP, skills, and agent plugins](/connect) | Planned integrations |
 
 ## Learn the workflow

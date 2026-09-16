@@ -142,12 +142,17 @@ def rect(hwnd):
 
 
 class Session:
-    def __init__(self, output):
+    def __init__(self, output, binding="cli"):
         self.output = output
         self.transcript = []
         self.log = (output / 'session.stderr').open('w', encoding='utf-8')
+        commands = {
+            "cli": [str(ROOT / 'target/debug/actuate.exe'), '--provider', 'native', 'session', '--json'],
+            "python": [sys.executable, str(ROOT / 'tests/python_binding_session.py')],
+            "typescript": ['bun', str(ROOT / 'tests/typescript_binding_session.ts')],
+        }
         self.process = subprocess.Popen(
-            [str(ROOT / 'target/debug/actuate.exe'), '--provider', 'native', 'session', '--json'],
+            commands[binding],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
             text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW)
         self.queue = queue.Queue()
@@ -203,13 +208,14 @@ def eventually(predicate, timeout=8):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binding', choices=['cli', 'python', 'typescript'], default='cli')
     parser.add_argument('--electron', type=Path, help='Path to locally installed electron.exe')
     parser.add_argument('--output', type=Path, default=ROOT / 'target/windows-e2e/results')
     parser.add_argument('--isolated-worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     results = {'checks': [], 'isolated_desktop': assert_isolated(), 'initial_desktop': desktop_state()}
-    session = Session(args.output)
+    session = Session(args.output, args.binding)
     children = []
     logs = []
     def check(name, action):
@@ -296,7 +302,7 @@ def main():
         def overlay_test():
             target = next(w for w in session.call('windows') if w['pid'] == children[0].pid and w['title'] == 'Actuate WPF fixture')
             log = (args.output / 'overlay.stderr').open('w', encoding='utf-8')
-            overlay = subprocess.Popen([str(ROOT / 'target/debug/actuate-overlay.exe')], stdin=subprocess.PIPE, stderr=log, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            overlay = subprocess.Popen([str(ROOT / 'target/debug/actuate.exe'), 'overlay'], stdin=subprocess.PIPE, stderr=log, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 for command in [dict(op='scope', scope=dict(kind='window', window_id=target['window_id'], pid=target['pid'])), dict(op='move', x=200, y=200, duration_ms=500)]:
                     overlay.stdin.write(json.dumps(command)+'\n')
