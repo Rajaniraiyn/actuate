@@ -1,5 +1,5 @@
+use actuate::{NativeError, Result, motion::MotionStyle};
 use serde::{Deserialize, Serialize};
-use unimation::{NativeError, Result, motion::MotionStyle};
 
 mod controller;
 pub mod idle;
@@ -132,12 +132,12 @@ macro_rules! unavailable_renderer {
         pub mod $module {
             /// Placeholder with no drawing or input side effects.
             pub struct UnavailableRenderer;
-            impl unimation::CursorVisualization for UnavailableRenderer {
+            impl actuate::CursorVisualization for UnavailableRenderer {
                 type Command = super::CursorCommand;
                 type Status = super::CursorAcknowledgement;
-                fn visualize(&mut self, command: Self::Command) -> unimation::Result<Self::Status> {
+                fn visualize(&mut self, command: Self::Command) -> actuate::Result<Self::Status> {
                     command.validate()?;
-                    Err(unimation::NativeError::new(
+                    Err(actuate::NativeError::new(
                         "cursor_renderer_unavailable",
                         concat!($platform, " cursor renderer is not implemented"),
                     ))
@@ -152,7 +152,7 @@ unavailable_renderer!(android, "Android");
 #[cfg(test)]
 mod tests {
     use super::*;
-    use unimation::{CursorVisualization, Effect};
+    use actuate::{CursorVisualization, Effect};
     #[test]
     fn command_roundtrip_and_validation() {
         let command: CursorCommand =

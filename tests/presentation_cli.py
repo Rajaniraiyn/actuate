@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-BIN = 'target/debug/unimation'
+BIN = 'target/debug/actuate'
 
 
 def run(*args):

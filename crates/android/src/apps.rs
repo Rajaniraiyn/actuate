@@ -1,7 +1,7 @@
 //! Launcher activities, independent of the selected ADB transport.
 use crate::{Android, CommandTransport, error};
+use actuate::{Effect, Receipt, Result};
 use serde::{Deserialize, Serialize};
-use unimation::{Effect, Receipt, Result};
 
 /// An explicit Android package/activity pair. Validation happens at construction
 /// and deserialization, before any command reaches the transport.
@@ -74,12 +74,12 @@ impl<D: CommandTransport> Android<D> {
 pub fn write_inventory(
     mut writer: impl std::io::Write,
     report: &LauncherActivities,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> std::io::Result<()> {
-    if format == unimation::OutputFormat::Text {
+    if format == actuate::OutputFormat::Text {
         writer.write_all(report.raw.as_bytes())
     } else {
-        unimation::output::write_value(writer, &serde_json::to_value(report)?, format)
+        actuate::output::write_value(writer, &serde_json::to_value(report)?, format)
     }
 }
 

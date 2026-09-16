@@ -17,7 +17,7 @@ pub use session::{
 };
 pub use windows::{Bounds, Window, WindowDiscovery, discover_windows, displays, virtual_desktop};
 
-use unimation::{Effect, NativeError};
+use actuate::{Effect, NativeError};
 fn error(code: &str, message: impl Into<String>) -> NativeError {
     NativeError {
         code: code.into(),
@@ -31,8 +31,8 @@ fn native(error_value: windows_api::core::Error) -> NativeError {
         format!("{} ({:#x})", error_value, error_value.code().0),
     )
 }
-fn dispatched(route: &str) -> unimation::Receipt {
-    unimation::Receipt {
+fn dispatched(route: &str) -> actuate::Receipt {
+    actuate::Receipt {
         effect: Effect::Dispatched,
         route: route.into(),
     }

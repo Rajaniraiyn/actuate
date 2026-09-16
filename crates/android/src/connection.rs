@@ -1,8 +1,8 @@
 //! Shared runtime and bounded shell transport for USB, TCP and paired TLS.
 use crate::{CommandTransport, error as fail};
+use actuate::{Effect, Result};
 use droidmux::client::AdbClient;
 use std::{io::Write, time::Duration};
-use unimation::{Effect, Result};
 pub(crate) struct Runtime(Option<tokio::runtime::Runtime>);
 impl Runtime {
     pub(crate) fn new() -> Result<Self> {

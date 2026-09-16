@@ -15,7 +15,7 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let window = NSWindow(contentRect: NSRect(x: 250, y: 230, width: 440, height: 420),
     styleMask: [.titled, .closable], backing: .buffered, defer: false)
-window.title = "Unimation scrolling fixture"
+window.title = "Actuate scrolling fixture"
 let status = NSTextField(labelWithString: "initial")
 status.frame = NSRect(x: 20, y: 380, width: 400, height: 24)
 status.setAccessibilityIdentifier("scroll-status")

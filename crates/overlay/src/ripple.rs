@@ -1,5 +1,5 @@
 //! Shared click feedback in logical points, independent of input delivery.
-use unimation::motion::MotionStyle;
+use actuate::motion::MotionStyle;
 
 pub const DURATION_SECONDS: f64 = 0.45;
 

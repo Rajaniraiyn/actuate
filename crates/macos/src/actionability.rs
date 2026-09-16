@@ -1,10 +1,10 @@
 //! Read-only evidence for a proposed interaction. Evidence is sampled, never a
 //! promise that a later event will reach or activate the element.
 use crate::{Accessibility, accessibility::attribute, error};
+use actuate::{Effect, ElementRef, Point, Result, geometry::Rect};
 use objc2_application_services::AXUIElement;
 use objc2_core_foundation::CFBoolean;
 use serde_json::{Value, json};
-use unimation::{Effect, ElementRef, Point, Result, geometry::Rect};
 
 fn native_bool(element: &AXUIElement, name: &str) -> Value {
     match attribute(element, name) {
@@ -135,7 +135,7 @@ impl Accessibility {
     }
 }
 
-impl unimation::Actionability for Accessibility {
+impl actuate::Actionability for Accessibility {
     type Report = Value;
     fn actionability(&mut self, target: &ElementRef) -> Result<Self::Report> {
         Accessibility::actionability(self, target)

@@ -90,7 +90,7 @@ unsafe fn create_window() -> Result<Window> {
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: instance,
-            lpszClassName: w!("UnimationCursorOverlay"),
+            lpszClassName: w!("ActuateCursorOverlay"),
             ..Default::default()
         };
         if RegisterClassW(&class) == 0 {
@@ -99,7 +99,7 @@ unsafe fn create_window() -> Result<Window> {
         Ok(Window(CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             class.lpszClassName,
-            w!("Unimation cursor"),
+            w!("Actuate cursor"),
             WS_POPUP,
             0,
             0,

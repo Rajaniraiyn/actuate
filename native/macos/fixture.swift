@@ -12,7 +12,7 @@ final class Probe: NSObject {
     @objc func dialog() {
         guard let window else { return }
         let alert = NSAlert()
-        alert.messageText = "Unimation modal test"
+        alert.messageText = "Actuate modal test"
         alert.addButton(withTitle: "Dismiss")
         alert.beginSheetModal(for: window) { _ in self.field.stringValue = "dismissed" }
     }
@@ -20,7 +20,7 @@ final class Probe: NSObject {
         guard dynamic == nil else { return }
         let item = NSTextField(labelWithString: "Dynamic item")
         item.frame = NSRect(x: 310, y: 100, width: 170, height: 24)
-        item.setAccessibilityIdentifier("unimation-dynamic-item")
+        item.setAccessibilityIdentifier("actuate-dynamic-item")
         window?.contentView?.addSubview(item)
         dynamic = item
     }
@@ -46,10 +46,10 @@ final class EventProbe: NSView {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 500, height: 420), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-window.title = "Unimation test fixture"
+window.title = "Actuate test fixture"
 let field = NSTextField(frame: NSRect(x: 20, y: 370, width: 460, height: 24))
 field.stringValue = "initial"
-field.setAccessibilityIdentifier("unimation-test-field")
+field.setAccessibilityIdentifier("actuate-test-field")
 let probe = Probe(field)
 probe.window = window
 func button(_ title: String, _ identifier: String, _ selector: Selector, _ y: CGFloat) -> NSButton {
@@ -59,32 +59,32 @@ func button(_ title: String, _ identifier: String, _ selector: Selector, _ y: CG
     window.contentView!.addSubview(button)
     return button
 }
-let click = button("Test click", "unimation-test-button", #selector(Probe.clicked), 320)
+let click = button("Test click", "actuate-test-button", #selector(Probe.clicked), 320)
 let checkbox = NSButton(checkboxWithTitle: "Test checkbox", target: probe, action: #selector(Probe.checked))
 checkbox.frame = NSRect(x: 20, y: 280, width: 260, height: 24)
-checkbox.setAccessibilityIdentifier("unimation-test-checkbox")
+checkbox.setAccessibilityIdentifier("actuate-test-checkbox")
 let slider = NSSlider(value: 20, minValue: 0, maxValue: 100, target: probe, action: #selector(Probe.slid))
 slider.frame = NSRect(x: 20, y: 240, width: 260, height: 24)
-slider.setAccessibilityIdentifier("unimation-test-slider")
+slider.setAccessibilityIdentifier("actuate-test-slider")
 let popup = NSPopUpButton(frame: NSRect(x: 20, y: 200, width: 260, height: 28), pullsDown: false)
 popup.addItems(withTitles: ["Alpha", "Beta", "Gamma"])
 popup.target = probe
 popup.action = #selector(Probe.picked)
-popup.setAccessibilityIdentifier("unimation-test-popup")
-let dialog = button("Show dialog", "unimation-test-dialog", #selector(Probe.dialog), 160)
-let add = button("Add item", "unimation-add-item", #selector(Probe.addItem), 120)
-let remove = button("Remove item", "unimation-remove-item", #selector(Probe.removeItem), 80)
+popup.setAccessibilityIdentifier("actuate-test-popup")
+let dialog = button("Show dialog", "actuate-test-dialog", #selector(Probe.dialog), 160)
+let add = button("Add item", "actuate-add-item", #selector(Probe.addItem), 120)
+let remove = button("Remove item", "actuate-remove-item", #selector(Probe.removeItem), 80)
 let scroll = ScrollProbe(frame: NSRect(x: 20, y: 10, width: 260, height: 35))
 scroll.field = field
 scroll.setAccessibilityElement(true)
 scroll.setAccessibilityRole(.scrollArea)
-scroll.setAccessibilityIdentifier("unimation-test-scroll")
+scroll.setAccessibilityIdentifier("actuate-test-scroll")
 let events = EventProbe(frame: NSRect(x: 310, y: 160, width: 170, height: 180))
 events.field = field
 // Custom AX button geometry exposes coordinates; native event behavior is implemented above.
 events.setAccessibilityElement(true)
 events.setAccessibilityRole(.button)
-events.setAccessibilityIdentifier("unimation-test-events")
+events.setAccessibilityIdentifier("actuate-test-events")
 for view in [field, checkbox, slider, popup, scroll, events] as [NSView] { window.contentView!.addSubview(view) }
 window.makeKeyAndOrderFront(nil)
 app.activate()

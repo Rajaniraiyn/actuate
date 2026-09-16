@@ -2,7 +2,7 @@
 """Disposable GTK4 fixture for Linux validation. Not linked or required by the library.
 
 Runs on Wayland by default; set GDK_BACKEND=x11 to run under Xwayland.
-Events append to the file named by UNIMATION_FIXTURE_LOG, one line each.
+Events append to the file named by ACTUATE_FIXTURE_LOG, one line each.
 """
 import os
 import sys
@@ -11,7 +11,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib  # noqa: E402
 
-LOG = os.environ.get("UNIMATION_FIXTURE_LOG")
+LOG = os.environ.get("ACTUATE_FIXTURE_LOG")
 
 
 def log(line):
@@ -23,10 +23,10 @@ def log(line):
 
 class Fixture(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=os.environ.get("UNIMATION_FIXTURE_ID", "dev.unimation.fixture"))
+        super().__init__(application_id=os.environ.get("ACTUATE_FIXTURE_ID", "dev.actuate.fixture"))
 
     def do_activate(self):
-        win = Gtk.ApplicationWindow(application=self, title=os.environ.get("UNIMATION_FIXTURE_TITLE", "Unimation Fixture"))
+        win = Gtk.ApplicationWindow(application=self, title=os.environ.get("ACTUATE_FIXTURE_TITLE", "Actuate Fixture"))
         win.set_default_size(520, 640)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
         win.set_child(box)

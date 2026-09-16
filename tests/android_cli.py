@@ -3,9 +3,9 @@ import json
 import os
 import subprocess
 
-env={k:v for k,v in os.environ.items() if not k.startswith('UNIMATION_')}
+env={k:v for k,v in os.environ.items() if not k.startswith('ACTUATE_')}
 def run(*args):
-    return subprocess.run(['target/debug/unimation',*args],text=True,capture_output=True,env=env)
+    return subprocess.run(['target/debug/actuate',*args],text=True,capture_output=True,env=env)
 r=run('--provider','android','capabilities','--json')
 assert r.returncode==0,r
 caps=json.loads(r.stdout)

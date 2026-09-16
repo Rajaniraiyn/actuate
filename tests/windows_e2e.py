@@ -51,14 +51,14 @@ def assert_isolated():
     if not interactive:
         raise C.WinError(C.get_last_error())
     try:
-        assert current.startswith('UnimationTest-') and current != desktop_name(interactive), f'Refusing fixtures on desktop {current!r}; input desktop is {desktop_name(interactive)!r}'
+        assert current.startswith('ActuateTest-') and current != desktop_name(interactive), f'Refusing fixtures on desktop {current!r}; input desktop is {desktop_name(interactive)!r}'
     finally:
         USER.CloseDesktop(interactive)
     return current
 
 
 def isolated_parent(script=None, log_path=None):
-    name = 'UnimationTest-' + uuid.uuid4().hex
+    name = 'ActuateTest-' + uuid.uuid4().hex
     desktop = USER.CreateDesktopW(name, None, None, 0, 0x01ff, None)
     if not desktop:
         raise C.WinError(C.get_last_error())
@@ -147,7 +147,7 @@ class Session:
         self.transcript = []
         self.log = (output / 'session.stderr').open('w', encoding='utf-8')
         self.process = subprocess.Popen(
-            [str(ROOT / 'target/debug/unimation.exe'), '--provider', 'native', 'session', '--json'],
+            [str(ROOT / 'target/debug/actuate.exe'), '--provider', 'native', 'session', '--json'],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
             text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW)
         self.queue = queue.Queue()
@@ -224,7 +224,7 @@ def main():
         desktop = assert_isolated()
         log = (args.output / (name+'.stderr')).open('w', encoding='utf-8')
         logs.append(log)
-        environment = dict(os.environ, UNIMATION_ISOLATED_DESKTOP=desktop)
+        environment = dict(os.environ, ACTUATE_ISOLATED_DESKTOP=desktop)
         environment.pop('ELECTRON_RUN_AS_NODE', None)
         child = subprocess.Popen(command, stdout=log, stderr=log, env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
         children.append(child)
@@ -234,7 +234,7 @@ def main():
         before = desktop_state()
         assert before['foreground'] not in [w['window_id'] for w in windows], 'Fixture is foreground'
         snapshot = session.snapshot(process.pid)
-        primary = next(w for w in windows if w['title'].startswith('Unimation'))
+        primary = next(w for w in windows if w['title'].startswith('Actuate'))
         scoped = session.call('snapshot',window_id=primary['window_id'],request=dict(pid=process.pid,max_nodes=500,max_depth=25))
         # Scoping does not make a native provider's tree complete. In particular,
         # System-menu children on an inactive desktop can lack runtime IDs.
@@ -267,8 +267,8 @@ def main():
         if any(state != before for state in steps.values()):
             raise AssertionError(steps)
         if name == 'wpf':
-            eventually(lambda: len([w for w in session.call('windows') if w['pid'] == process.pid and w['title'].startswith('Unimation WPF')]) == 2)
-            assert len([n for n in after['nodes'] if n['attributes'].get('name', '').startswith('Unimation WPF')]) == 2
+            eventually(lambda: len([w for w in session.call('windows') if w['pid'] == process.pid and w['title'].startswith('Actuate WPF')]) == 2)
+            assert len([n for n in after['nodes'] if n['attributes'].get('name', '').startswith('Actuate WPF')]) == 2
         assert session.call('inspect', target='@e'+str(button['reference']['id']))['reference'] == button['reference']
         foreign = dict(button['reference'], session='foreign-test-session')
         assert session.call('inspect', target=foreign, allow_error=True)['error']['code'] == 'wrong_session'
@@ -294,9 +294,9 @@ def main():
         else:
             results['checks'].append(dict(name='electron', status='skipped', reason='Supply --electron'))
         def overlay_test():
-            target = next(w for w in session.call('windows') if w['pid'] == children[0].pid and w['title'] == 'Unimation WPF fixture')
+            target = next(w for w in session.call('windows') if w['pid'] == children[0].pid and w['title'] == 'Actuate WPF fixture')
             log = (args.output / 'overlay.stderr').open('w', encoding='utf-8')
-            overlay = subprocess.Popen([str(ROOT / 'target/debug/unimation-overlay.exe')], stdin=subprocess.PIPE, stderr=log, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            overlay = subprocess.Popen([str(ROOT / 'target/debug/actuate-overlay.exe')], stdin=subprocess.PIPE, stderr=log, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 for command in [dict(op='scope', scope=dict(kind='window', window_id=target['window_id'], pid=target['pid'])), dict(op='move', x=200, y=200, duration_ms=500)]:
                     overlay.stdin.write(json.dumps(command)+'\n')

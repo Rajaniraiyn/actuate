@@ -48,7 +48,7 @@ def main():
     def start(mode):
         process=subprocess.Popen([str(ROOT/'target/debug/examples/windows_dialog_fixture.exe'),'--interactive',mode,str(root)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
         processes.append(process)
-        title='Unimation native Save' if mode=='save' else 'Unimation native Open'
+        title='Actuate native Save' if mode=='save' else 'Actuate native Open'
         def ready():
             if process.poll() is not None:
                 out,err=process.communicate()

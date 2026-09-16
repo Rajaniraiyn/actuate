@@ -28,7 +28,7 @@ enum Format {
     Compact,
     Text,
 }
-impl From<Format> for unimation::OutputFormat {
+impl From<Format> for actuate::OutputFormat {
     fn from(value: Format) -> Self {
         match value {
             Format::Json => Self::Json,
@@ -47,7 +47,7 @@ enum SnapshotScope {
     Application,
     Window,
 }
-impl From<SnapshotScope> for unimation::SnapshotScope {
+impl From<SnapshotScope> for actuate::SnapshotScope {
     fn from(value: SnapshotScope) -> Self {
         match value {
             SnapshotScope::Application => Self::Application,
@@ -62,7 +62,7 @@ enum CaptureRoute {
 }
 
 #[derive(Cli)]
-#[usage(bin = "unimation", version, completion)]
+#[usage(bin = "actuate", version, completion)]
 struct App {
     /// Automation provider; native selects the host, apple-simulator selects CoreSimulator.
     #[usage(
@@ -70,18 +70,18 @@ struct App {
         long,
         global,
         default = "native",
-        env = "UNIMATION_PROVIDER",
+        env = "ACTUATE_PROVIDER",
         value_enum
     )]
     provider: Provider,
     /// Provider device identifier: Apple UDID, Android IP:port, or usb:VID:PID.
-    #[usage(long, global, env = "UNIMATION_DEVICE")]
+    #[usage(long, global, env = "ACTUATE_DEVICE")]
     device: Option<String>,
     /// Existing simulator device set, required for apple-simulator.
-    #[usage(long, global, env = "UNIMATION_DEVICE_SET", value_hint = usage::ValueHint::DirPath)]
+    #[usage(long, global, env = "ACTUATE_DEVICE_SET", value_hint = usage::ValueHint::DirPath)]
     device_set: Option<std::path::PathBuf>,
     /// Explicit Android credential directory, or PEM key for USB.
-    #[usage(long, global, env = "UNIMATION_CREDENTIALS", value_hint = usage::ValueHint::AnyPath)]
+    #[usage(long, global, env = "ACTUATE_CREDENTIALS", value_hint = usage::ValueHint::AnyPath)]
     credentials: Option<std::path::PathBuf>,
     /// Record the first wireless public key; subsequent key changes fail.
     #[usage(long, global)]
@@ -252,7 +252,7 @@ struct Connection {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::parse();
     let format = if app.json {
-        unimation::OutputFormat::Json
+        actuate::OutputFormat::Json
     } else {
         app.format.into()
     };
@@ -266,7 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if matches!(app.command, Command::Protocol) {
-        println!("{}", include_str!("../../../docs/session.md"));
+        println!("{}", include_str!("../../../_specs/session.md"));
         return Ok(());
     }
     if matches!(app.command, Command::Spec) {
@@ -286,11 +286,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             after,
             modified_only,
         } => {
-            let before: unimation::Snapshot =
-                serde_json::from_reader(std::fs::File::open(before)?)?;
-            let after: unimation::Snapshot = serde_json::from_reader(std::fs::File::open(after)?)?;
-            let diff = unimation::diff::diff_snapshots(&before, &after)?;
-            if format == unimation::OutputFormat::Compact {
+            let before: actuate::Snapshot = serde_json::from_reader(std::fs::File::open(before)?)?;
+            let after: actuate::Snapshot = serde_json::from_reader(std::fs::File::open(after)?)?;
+            let diff = actuate::diff::diff_snapshots(&before, &after)?;
+            if format == actuate::OutputFormat::Compact {
                 if modified_only {
                     return Err("--modified-only selects native fields; use --format json or text for that mode".into());
                 }
@@ -298,15 +297,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "{}",
                     serde_json::json!({
                         "root": before.root, "before_revision": before.revision, "after_revision": after.revision,
-                        "text": unimation::presentation::render_view_diff(&before, &after, &Default::default(), 100)?
+                        "text": actuate::presentation::render_view_diff(&before, &after, &Default::default(), 100)?
                     })
                 );
                 return Ok(());
             }
-            if format == unimation::OutputFormat::Text && !modified_only {
+            if format == actuate::OutputFormat::Text && !modified_only {
                 print!(
                     "{}",
-                    unimation::presentation::render_view_diff(
+                    actuate::presentation::render_view_diff(
                         &before,
                         &after,
                         &Default::default(),
@@ -315,14 +314,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return Ok(());
             }
-            if format == unimation::OutputFormat::Text {
+            if format == actuate::OutputFormat::Text {
                 let mut diff = diff;
                 if modified_only {
                     diff.newly_observed.clear();
                     diff.removed_from_scope.clear();
                     diff.no_longer_observed.clear();
                 }
-                print!("{}", unimation::presentation::render_diff_text(&diff, 160));
+                print!("{}", actuate::presentation::render_diff_text(&diff, 160));
                 return Ok(());
             }
             let value = if modified_only {
@@ -340,7 +339,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             hide_hidden,
             limit,
         } => {
-            let snapshot: unimation::Snapshot =
+            let snapshot: actuate::Snapshot =
                 serde_json::from_reader(std::fs::File::open(snapshot)?)?;
             let root = root
                 .map(|r| parse_short_ref(&snapshot.root.session, &r))
@@ -348,7 +347,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             emit_snapshot(
                 &snapshot,
                 format,
-                &unimation::presentation::PresentationOptions {
+                &actuate::presentation::PresentationOptions {
                     root,
                     actionable_only: interactive,
                     hide_known_hidden: hide_hidden,
@@ -363,16 +362,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             name,
             action,
         } => {
-            let snapshot: unimation::Snapshot =
+            let snapshot: actuate::Snapshot =
                 serde_json::from_reader(std::fs::File::open(snapshot)?)?;
-            let query = unimation::query::NodeQuery {
-                role: role.map(|value| unimation::query::TextMatch::Exact { value }),
-                name: name.map(|value| unimation::query::TextMatch::Contains { value }),
+            let query = actuate::query::NodeQuery {
+                role: role.map(|value| actuate::query::TextMatch::Exact { value }),
+                name: name.map(|value| actuate::query::TextMatch::Contains { value }),
                 action,
                 ..Default::default()
             };
             emit_value(
-                &serde_json::to_value(unimation::query::query_nodes(&snapshot, &query))?,
+                &serde_json::to_value(actuate::query::query_nodes(&snapshot, &query))?,
                 format,
             )?;
             Ok(())
@@ -383,7 +382,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run(
     command: Command,
     connection: Connection,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "android")]
     if matches!(command, Command::Android { .. }) || connection.provider == Provider::Android {
@@ -417,7 +416,7 @@ fn run(
     };
     #[cfg(feature = "idevice")]
     if connection.provider == Provider::Idevice {
-        use unimation::Capture;
+        use actuate::Capture;
         if connection.device_set.is_some() {
             return Err(
                 "--device-set selects CoreSimulator storage; omit it for --provider apple-device"
@@ -434,7 +433,7 @@ fn run(
                     return Ok(emit_value(&serde_json::to_value(provider.info(udid)?)?, format)?);
                 }
                 let devices = provider.discover()?;
-                if devices.devices.is_empty() && format == unimation::OutputFormat::Text {
+                if devices.devices.is_empty() && format == actuate::OutputFormat::Text {
                     println!("No physical iOS devices returned by usbmuxd; inventory completeness is unknown.");
                     return Ok(());
                 }
@@ -456,7 +455,7 @@ fn run(
 fn run_host(
     _: Command,
     _: Connection,
-    _: unimation::OutputFormat,
+    _: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     Err("No provider implemented for this OS yet".into())
 }
@@ -464,10 +463,10 @@ fn run_host(
 fn run_host(
     command: Command,
     connection: Connection,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use actuate::ObserveRequest;
     use linux::session::{CaptureSource, LinuxRequest, LinuxSession};
-    use unimation::ObserveRequest;
     if connection.device.is_some() || connection.device_set.is_some() {
         return Err(
             "--device and --device-set select mobile providers; the Linux host takes neither"
@@ -481,8 +480,8 @@ fn run_host(
     let value = match command {
         Command::Discover { scope } => {
             let scope = match scope {
-                DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
-                DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
+                DiscoveryScope::All => actuate::discovery::DiscoveryScope::All,
+                DiscoveryScope::Apps => actuate::discovery::DiscoveryScope::Apps,
             };
             session.dispatch(serde_json::json!({"op":"discover","scope":scope,"format":format}))?
         }
@@ -511,7 +510,7 @@ fn run_host(
                 },
                 scope: scope.into(),
                 format,
-                options: unimation::presentation::PresentationOptions {
+                options: actuate::presentation::PresentationOptions {
                     actionable_only: interactive,
                     hide_known_hidden: hide_hidden,
                     max_nodes: limit,
@@ -574,9 +573,9 @@ fn run_host(
 fn run_host(
     command: Command,
     connection: Connection,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use unimation::{Discover, ObserveRequest};
+    use actuate::{Discover, ObserveRequest};
     if let Command::Apple {
         command: AppleCommand::Simulators {
             command: SimulatorCommand::List,
@@ -591,7 +590,7 @@ fn run_host(
             sim = sim.with_set(path);
         }
         let inventory = sim.list()?;
-        if format == unimation::OutputFormat::Text {
+        if format == actuate::OutputFormat::Text {
             let mut rows = Vec::new();
             for runtime in inventory["runtimes"].as_array().into_iter().flatten() {
                 rows.push(serde_json::json!({"runtime":runtime["identifier"],"name":runtime["name"],"available":runtime["isAvailable"]}));
@@ -631,7 +630,7 @@ fn run_host(
                 ios::session::Request::Snapshot {
                     scope: pid.map(|pid| ios::SimulatorScope::Application {pid}).unwrap_or(ios::SimulatorScope::Frontmost),
                     max_nodes, max_depth, format,
-                    options:unimation::presentation::PresentationOptions {actionable_only:interactive,hide_known_hidden:hide_hidden,max_nodes:limit,..Default::default()},
+                    options:actuate::presentation::PresentationOptions {actionable_only:interactive,hide_known_hidden:hide_hidden,max_nodes:limit,..Default::default()},
                 }
             }
             Command::Capture {path,display,window,backend,max_pixel_edge} => {
@@ -661,10 +660,10 @@ fn run_host(
         Command::Android { .. } => unreachable!(),
         Command::Discover { scope } => {
             let scope = match scope {
-                DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
-                DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
+                DiscoveryScope::All => actuate::discovery::DiscoveryScope::All,
+                DiscoveryScope::Apps => actuate::discovery::DiscoveryScope::Apps,
             };
-            let value = unimation::discovery::present_discovery(&ax.discover()?, scope, format);
+            let value = actuate::discovery::present_discovery(&ax.discover()?, scope, format);
             return emit_pretty(&value, format);
         }
         Command::Observe {
@@ -693,7 +692,7 @@ fn run_host(
                     },
                     scope,
                     format,
-                    options: unimation::presentation::PresentationOptions {
+                    options: actuate::presentation::PresentationOptions {
                         actionable_only: interactive,
                         hide_known_hidden: hide_hidden,
                         max_nodes: limit,
@@ -753,16 +752,16 @@ fn run_host(
     Ok(())
 }
 #[cfg(target_os = "macos")]
-fn session(format: unimation::OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+fn session(format: actuate::OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = macos::session::MacSession::new();
-    unimation::transport::serve(
+    actuate::transport::serve(
         std::io::stdin().lock(),
         std::io::stdout().lock(),
         format,
         |request| {
             runtime
                 .dispatch(request)
-                .map(unimation::transport::ValueReply::from)
+                .map(actuate::transport::ValueReply::from)
         },
     )?;
     Ok(())
@@ -771,18 +770,18 @@ fn session(format: unimation::OutputFormat) -> Result<(), Box<dyn std::error::Er
 fn parse_short_ref(
     session: &str,
     value: &str,
-) -> Result<unimation::ElementRef, Box<dyn std::error::Error>> {
-    unimation::ElementRef::parse_short(session, value)
+) -> Result<actuate::ElementRef, Box<dyn std::error::Error>> {
+    actuate::ElementRef::parse_short(session, value)
         .map_err(|_| "--root must be @e<number> from the saved snapshot".into())
 }
 /// Rendered text prints verbatim; compact JSON stays on one line; full JSON is pretty.
 fn emit_pretty(
     value: &serde_json::Value,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(text) = value.as_str() {
         print!("{text}");
-    } else if format == unimation::OutputFormat::Compact {
+    } else if format == actuate::OutputFormat::Compact {
         println!("{}", serde_json::to_string(value)?);
     } else {
         println!("{}", serde_json::to_string_pretty(value)?);
@@ -810,39 +809,37 @@ fn require_plain_capture(
     Ok(())
 }
 fn emit_snapshot(
-    snapshot: &unimation::Snapshot,
-    format: unimation::OutputFormat,
-    options: &unimation::presentation::PresentationOptions,
+    snapshot: &actuate::Snapshot,
+    format: actuate::OutputFormat,
+    options: &actuate::presentation::PresentationOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match format {
-        unimation::OutputFormat::Json => {
+        actuate::OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(snapshot)?)
         }
-        unimation::OutputFormat::Compact => println!(
+        actuate::OutputFormat::Compact => println!(
             "{}",
-            serde_json::to_string(&unimation::presentation::render_snapshot(
-                snapshot, options
-            )?)?
+            serde_json::to_string(&actuate::presentation::render_snapshot(snapshot, options)?)?
         ),
-        unimation::OutputFormat::Text => print!(
+        actuate::OutputFormat::Text => print!(
             "{}",
-            unimation::presentation::render_snapshot_text(
-                &unimation::presentation::render_snapshot(snapshot, options)?
-            )
+            actuate::presentation::render_snapshot_text(&actuate::presentation::render_snapshot(
+                snapshot, options
+            )?)
         ),
     }
     Ok(())
 }
 
-fn emit_value(value: &serde_json::Value, format: unimation::OutputFormat) -> std::io::Result<()> {
-    unimation::output::write_value(std::io::stdout().lock(), value, format)
+fn emit_value(value: &serde_json::Value, format: actuate::OutputFormat) -> std::io::Result<()> {
+    actuate::output::write_value(std::io::stdout().lock(), value, format)
 }
 
 #[cfg(feature = "android")]
 fn run_android(
     command: Command,
     connection: Connection,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use android::wireless::{FirstConnectionPolicy, WirelessHost};
     use std::io::Write;
@@ -971,7 +968,7 @@ fn run_android(
 fn execute_android<D: android::CommandTransport>(
     command: Command,
     mut device: android::Android<D>,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Command::Discover {

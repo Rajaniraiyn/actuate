@@ -12,6 +12,10 @@ use crate::{
     CursorAcknowledgement, CursorAppearance, CursorCommand, CursorScope,
     shape::{HOTSPOT, OUTLINE, UNIT},
 };
+use actuate::{
+    NativeError, Result,
+    motion::{self, MotionStyle},
+};
 use compositor::{
     Hyprland, hyprland,
     wayland::{Desktop, Outputs, ShmBuffer, fail},
@@ -26,10 +30,6 @@ use std::{
     },
     thread::JoinHandle,
     time::{Duration, Instant},
-};
-use unimation::{
-    NativeError, Result,
-    motion::{self, MotionStyle},
 };
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
@@ -232,7 +232,7 @@ impl Renderer {
                 &surface,
                 Some(&wl),
                 zwlr_layer_shell_v1::Layer::Overlay,
-                "unimation-cursor".into(),
+                "actuate-cursor".into(),
                 &qh,
                 (),
             );
@@ -307,7 +307,7 @@ impl Renderer {
         let previous = self.target.as_ref().and_then(|t| t.rect);
         let target = match client {
             Some(c) => {
-                let rect = |r: unimation::geometry::Rect| (r.x, r.y, r.width, r.height);
+                let rect = |r: actuate::geometry::Rect| (r.x, r.y, r.width, r.height);
                 let (visible, covered) = match hyprland::stacking_above(c, &clients, &monitors) {
                     hyprland::Stacking::Covered => (false, vec![]),
                     hyprland::Stacking::Above(above) => (
@@ -756,7 +756,7 @@ fn run_loop(
                 .map(|l| l.message != e.message)
                 .unwrap_or(true)
             {
-                eprintln!("unimation-overlay: {e}");
+                eprintln!("actuate-overlay: {e}");
             }
             last_error = Some(e);
         }
@@ -785,7 +785,7 @@ impl LayerCursor {
         let running = Arc::new(AtomicBool::new(true));
         let flag = running.clone();
         let thread = std::thread::Builder::new()
-            .name("unimation-cursor".into())
+            .name("actuate-cursor".into())
             .spawn(move || run_loop(receiver, flag, ready_tx))
             .map_err(|e| NativeError::new("cursor_renderer_unavailable", e))?;
         match ready_rx.recv_timeout(Duration::from_secs(5)) {
@@ -835,7 +835,7 @@ impl Drop for LayerCursor {
         let _ = self.stop();
     }
 }
-impl unimation::CursorVisualization for LayerCursor {
+impl actuate::CursorVisualization for LayerCursor {
     type Command = CursorCommand;
     type Status = CursorAcknowledgement;
     fn visualize(&mut self, command: CursorCommand) -> Result<CursorAcknowledgement> {
@@ -853,7 +853,7 @@ pub fn run() {
     let mut cursor = match LayerCursor::start() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("unimation-overlay: {e}");
+            eprintln!("actuate-overlay: {e}");
             std::process::exit(1);
         }
     };
@@ -863,10 +863,10 @@ pub fn run() {
             Ok(CursorCommand::Quit) => break,
             Ok(command) => {
                 if let Err(e) = cursor.visualize(command) {
-                    eprintln!("unimation-overlay: {e}");
+                    eprintln!("actuate-overlay: {e}");
                 }
             }
-            Err(e) => eprintln!("unimation-overlay: invalid command: {e}"),
+            Err(e) => eprintln!("actuate-overlay: invalid command: {e}"),
         }
         if !cursor.is_running() {
             break;

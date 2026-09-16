@@ -43,9 +43,9 @@ def window_proc(hwnd, message, wparam, lparam):
 
 
 instance = kernel.GetModuleHandleW(None)
-wc = WindowClass(proc=window_proc, instance=instance, background=6, name='UnimationNativeFixture')
+wc = WindowClass(proc=window_proc, instance=instance, background=6, name='ActuateNativeFixture')
 assert user.RegisterClassW(C.byref(wc))
-window = user.CreateWindowExW(0, wc.name, 'Unimation Win32 fixture', 0x00cf0000,
+window = user.CreateWindowExW(0, wc.name, 'Actuate Win32 fixture', 0x00cf0000,
                             100, 100, 420, 320, None, None, instance, None)
 assert window
 

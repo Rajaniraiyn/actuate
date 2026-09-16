@@ -9,6 +9,10 @@ use crate::{
     wayland_input::WaylandInput,
     x11::{X11, XSpace},
 };
+use actuate::{
+    session::{ActionEpoch, FrameHistory, SnapshotHistory, render, wait_attribute},
+    *,
+};
 use compositor::{
     Hyprland,
     hyprland::{self, Client, Monitor},
@@ -17,10 +21,6 @@ use overlay::{CursorCommand, CursorScope, OverlayController, linux::LayerCursor}
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use unimation::{
-    session::{ActionEpoch, FrameHistory, SnapshotHistory, render, wait_attribute},
-    *,
-};
 
 /// Which server receives global pointer, text and key input.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -258,7 +258,7 @@ impl LinuxSession {
             InputRoute::X11
         };
         // A person watching the agent can ask for the soft cursor from the start.
-        let (cursor, cursor_error) = if std::env::var_os("UNIMATION_SOFT_CURSOR").is_some() {
+        let (cursor, cursor_error) = if std::env::var_os("ACTUATE_SOFT_CURSOR").is_some() {
             match LayerCursor::start() {
                 Ok(cursor) => (Some(Cursor::Layer(cursor)), None),
                 Err(e) => (None, Some(e)),

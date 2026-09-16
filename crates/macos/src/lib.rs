@@ -10,9 +10,9 @@ pub use input::QuartzInput;
 fn error(
     code: impl ToString,
     message: impl ToString,
-    effect: unimation::Effect,
-) -> unimation::NativeError {
-    unimation::NativeError::new(code.to_string(), message).with_effect(effect)
+    effect: actuate::Effect,
+) -> actuate::NativeError {
+    actuate::NativeError::new(code.to_string(), message).with_effect(effect)
 }
 
 pub mod capture;
@@ -30,13 +30,13 @@ mod discovery;
 
 mod actionability;
 
-impl unimation::ObserveScope for Accessibility {
+impl actuate::ObserveScope for Accessibility {
     type Scope = i32;
     fn observe_scope(
         &mut self,
         pid: i32,
-        budget: unimation::ObservationBudget,
-    ) -> unimation::Result<unimation::Snapshot> {
-        unimation::Observe::observe(self, unimation::ObserveRequest::new(pid, budget))
+        budget: actuate::ObservationBudget,
+    ) -> actuate::Result<actuate::Snapshot> {
+        actuate::Observe::observe(self, actuate::ObserveRequest::new(pid, budget))
     }
 }

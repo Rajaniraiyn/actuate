@@ -45,7 +45,7 @@
 +
 +[workspace]
 --- /dev/null
-+++ b/droidmux-client/UNIMATION.md
++++ b/droidmux-client/ACTUATE.md
 @@ -0,0 +1,31 @@
 +# Buffered reads after remote close
 +
@@ -75,7 +75,7 @@
 +fail explicitly. Tests reproduce stdout+exit+CLSE before consumption, reject
 +byte-limit overflow and reject empty-packet floods.
 +
-+`UNIMATION_ADB_TRACE_METADATA` enables stderr packet direction/type, stream IDs
++`ACTUATE_ADB_TRACE_METADATA` enables stderr packet direction/type, stream IDs
 +and length diagnostics. It never prints shell commands, service names or payload
 +contents. Error diagnostics distinguish queue, byte-window and reader failures.
 --- a/droidmux-client/src/client.rs
@@ -277,7 +277,7 @@
 +
 +// Diagnostic metadata only: service names, commands and payload bytes are never logged.
 +fn trace_packet(direction: &str, packet: &AdbPacket) {
-+    if std::env::var_os("UNIMATION_ADB_TRACE_METADATA").is_some() {
++    if std::env::var_os("ACTUATE_ADB_TRACE_METADATA").is_some() {
 +        eprintln!(
 +            "adb {direction} {:?} arg0={} arg1={} length={}",
 +            packet.command,

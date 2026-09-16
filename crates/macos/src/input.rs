@@ -1,11 +1,11 @@
 use crate::{Accessibility, error};
+use actuate::*;
 use objc2_core_foundation::{CFRetained, CGPoint};
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton,
     CGScrollEventUnit,
 };
 use std::time::Duration;
-use unimation::*;
 
 /// Public Quartz delivery. Does not activate apps or promise background consumption.
 #[derive(Default)]

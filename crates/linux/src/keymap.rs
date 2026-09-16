@@ -73,7 +73,7 @@ impl UnicodeKeymap {
         }
         let max = order.len() as u32 + 1 + XKB_OFFSET;
         let text = format!(
-            "xkb_keymap {{\n  xkb_keycodes \"unimation\" {{\n    minimum = 8;\n    maximum = {max};\n{keycodes}  }};\n  xkb_types \"unimation\" {{\n    type \"ONE_LEVEL\" {{ modifiers = none; map[none] = Level1; level_name[Level1] = \"Any\"; }};\n  }};\n  xkb_compatibility \"unimation\" {{ }};\n  xkb_symbols \"unimation\" {{\n{symbols}  }};\n}};\n",
+            "xkb_keymap {{\n  xkb_keycodes \"actuate\" {{\n    minimum = 8;\n    maximum = {max};\n{keycodes}  }};\n  xkb_types \"actuate\" {{\n    type \"ONE_LEVEL\" {{ modifiers = none; map[none] = Level1; level_name[Level1] = \"Any\"; }};\n  }};\n  xkb_compatibility \"actuate\" {{ }};\n  xkb_symbols \"actuate\" {{\n{symbols}  }};\n}};\n",
         );
         Some(Self { text, codes })
     }
@@ -103,7 +103,7 @@ pub fn chunks(text: &str) -> Vec<String> {
 }
 
 /// Modifier mask from the portable modifier flags.
-pub fn modifier_mask(modifiers: unimation::Modifiers) -> u32 {
+pub fn modifier_mask(modifiers: actuate::Modifiers) -> u32 {
     let mut mask = 0;
     if modifiers.shift {
         mask |= MOD_SHIFT;
@@ -147,7 +147,7 @@ mod tests {
     }
     #[test]
     fn modifier_masks_follow_pc_keymap_bits() {
-        let mods = unimation::Modifiers {
+        let mods = actuate::Modifiers {
             shift: true,
             control: true,
             alt: false,

@@ -13,7 +13,7 @@ public static class FixtureDesktop {
         var name = new StringBuilder(256);
         int needed;
         if (!GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), 2, name, 512, out needed)
-            || !name.ToString().StartsWith("UnimationTest-"))
+            || !name.ToString().StartsWith("ActuateTest-"))
             throw new InvalidOperationException("Run fixtures through tests/windows_e2e.py on its isolated desktop");
     }
 }
@@ -23,7 +23,7 @@ if (-not $Interactive) { [FixtureDesktop]::Verify() }
 Add-Type -AssemblyName PresentationFramework, WindowsBase, System.Windows.Forms, System.Drawing
 if ($Toolkit -eq 'wpf') {
     $window = New-Object Windows.Window
-    $window.Title = 'Unimation WPF fixture'
+    $window.Title = 'Actuate WPF fixture'
     $window.Width = 420; $window.Height = 320
     $window.Left = 60; $window.Top = 80
     $window.ShowActivated = $false
@@ -57,7 +57,7 @@ if ($Toolkit -eq 'wpf') {
         $edit.Text = 'Window-scoped cursor test'
         $tray = New-Object Windows.Forms.NotifyIcon
         $tray.Icon = [Drawing.SystemIcons]::Information
-        $tray.Text = 'Unimation test tray'
+        $tray.Text = 'Actuate test tray'
         $trayMenu = New-Object Windows.Forms.ContextMenuStrip
         $trayItem = $trayMenu.Items.Add('Increment test counter')
         $trayItem.Add_Click({ $script:count++; $status.Text = "count:$script:count" })
@@ -67,12 +67,12 @@ if ($Toolkit -eq 'wpf') {
         $window.Add_Closed({ $tray.Visible = $false; $tray.Dispose(); $trayMenu.Dispose() })
     }
     $second = New-Object Windows.Window
-    $second.Title = 'Unimation WPF second window'
+    $second.Title = 'Actuate WPF second window'
     $second.Width = 260; $second.Height = 120
     $second.Left = 500; $second.Top = 80
     $second.ShowActivated = $false
     if ($Interactive) {
-        $second.Title = 'Unimation occlusion test'
+        $second.Title = 'Actuate occlusion test'
         $second.Left = 740; $second.Top = 180
         $second.Width = 320; $second.Height = 200
         $second.Background = '#26334A'
@@ -92,7 +92,7 @@ public class PassiveFixture : System.Windows.Forms.Form {
 }
 '@
     $window = New-Object PassiveFixture
-    $window.Text = 'Unimation WinForms fixture'
+    $window.Text = 'Actuate WinForms fixture'
     $window.Width = 420; $window.Height = 320
     $window.StartPosition = 'Manual'; $window.Left = 60; $window.Top = 420
     $status = New-Object Windows.Forms.Label

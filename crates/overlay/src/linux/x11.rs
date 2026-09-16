@@ -1,13 +1,13 @@
 //! X11 renderer for native X sessions: an override-redirect window with an
 //! empty Shape input region. Wayland sessions use the layer-shell renderer.
 use crate::{CursorAppearance, CursorCommand, CursorScope, shape};
+use actuate::motion;
 use std::{
     error::Error,
     io::{self, BufRead},
     sync::mpsc,
     time::{Duration, Instant},
 };
-use unimation::motion;
 use x11rb::{
     connection::Connection,
     protocol::{

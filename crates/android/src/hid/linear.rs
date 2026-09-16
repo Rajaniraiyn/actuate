@@ -8,11 +8,11 @@ use crate::{
     cursor::{self, CursorObservation, DisplayGeometry, Point},
     error,
 };
-use std::time::Duration;
-use unimation::{
+use actuate::{
     Effect, Result,
     motion::{MotionStyle, RelativeMotionPlan},
 };
+use std::time::Duration;
 
 const ACCELERATION: &str = "mouse_pointer_acceleration_enabled";
 const SPEED: &str = "pointer_speed";
@@ -381,7 +381,7 @@ impl CommandTransport for LinearPointer<'_, '_> {
         self.pointer.execute(command, stdout, stderr)
     }
 }
-fn after_motion(mut failure: unimation::NativeError) -> unimation::NativeError {
+fn after_motion(mut failure: actuate::NativeError) -> actuate::NativeError {
     failure.effect = Effect::Unknown;
     failure
 }

@@ -1,5 +1,5 @@
+use actuate::*;
 use std::time::{Duration, Instant};
-use unimation::*;
 use windows_api::Win32::UI::Input::KeyboardAndMouse::*;
 
 /// Explicit shared-desktop input. It never activates a window or falls back from UIA.

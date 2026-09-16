@@ -1,6 +1,7 @@
 //! Window-addressed SkyLight input. Private entry points are runtime capabilities.
 //! A dispatch receipt does not prove that an application consumed an event.
 use crate::{Accessibility, error};
+use actuate::{Effect, Modifiers, Point, Receipt, Result};
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString, CFType, CGPoint};
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventType, CGMouseButton, CGScrollEventUnit,
@@ -14,7 +15,6 @@ use std::{
         atomic::{AtomicI64, Ordering},
     },
 };
-use unimation::{Effect, Modifiers, Point, Receipt, Result};
 
 type Post = unsafe extern "C" fn(i32, *const CGEvent);
 type SetLocal = unsafe extern "C" fn(*const CGEvent, CGPoint);

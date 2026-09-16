@@ -4,10 +4,10 @@ use crate::{
     connection::{Connection, Runtime},
     error,
 };
+use actuate::{Effect, Result};
 use droidmux::{auth::RsaAdbCredential, client::AdbClient};
 use serde::Serialize;
 use std::{io::Write, net::SocketAddr, path::Path, sync::Arc, time::Duration};
-use unimation::{Effect, Result};
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct DirectDevice(Connection);
@@ -80,13 +80,13 @@ impl CommandTransport for DirectDevice {
 }
 fn load_key(path: &Path) -> Result<RsaAdbCredential> {
     let pem = std::fs::read_to_string(path).map_err(|e| error("android_key", e, Effect::None))?;
-    RsaAdbCredential::from_pkcs8_pem(&pem, "unimation")
+    RsaAdbCredential::from_pkcs8_pem(&pem, "actuate")
         .map_err(|e| error("android_key", e, Effect::None))
 }
 /// Create a persistent host identity without replacing an existing file.
 pub fn init_key(path: &Path) -> Result<()> {
-    let key = RsaAdbCredential::generate("unimation")
-        .map_err(|e| error("android_key", e, Effect::None))?;
+    let key =
+        RsaAdbCredential::generate("actuate").map_err(|e| error("android_key", e, Effect::None))?;
     let pem = key
         .to_pkcs8_pem()
         .map_err(|e| error("android_key", e, Effect::None))?;

@@ -1,6 +1,7 @@
 //! Hyprland IPC over its per-instance UNIX socket. Read-only queries return
 //! the compositor's JSON; dispatches are explicit Lua calls. Nothing here
 //! implies another compositor exposes the same window identities.
+use actuate::{Effect, NativeError, Point, Result, geometry::Rect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -9,7 +10,6 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-use unimation::{Effect, NativeError, Point, Result, geometry::Rect};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct Workspace {

@@ -1,12 +1,12 @@
 //! External JSONL adapter. Typed providers never serialize between components.
 use crate::session::{self, Request, Response, Session, SessionBackend, fail};
+use actuate::{OutputFormat, Result, Snapshot, transport};
 use serde::{Serialize, Serializer};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, Write},
     path::Path,
 };
-use unimation::{OutputFormat, Result, Snapshot, transport};
 
 // Serialize borrowed typed results directly to the output stream. In particular,
 // do not clone snapshots into a second serde_json::Value tree before encoding.

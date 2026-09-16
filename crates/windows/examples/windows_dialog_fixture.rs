@@ -1,5 +1,5 @@
 //! Opt-in native common-dialog fixture. Reads/writes stay inside the supplied
-//! disposable directory; automation comes from a separate Unimation session.
+//! disposable directory; automation comes from a separate Actuate session.
 #[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::{io, path::PathBuf};
@@ -61,9 +61,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         dialog.SetFolder(&folder)?;
         dialog.SetTitle(if save {
-            w!("Unimation native Save")
+            w!("Actuate native Save")
         } else {
-            w!("Unimation native Open")
+            w!("Actuate native Open")
         })?;
         dialog.SetDefaultExtension(w!("txt"))?;
         dialog.SetFileName(w!("report.txt"))?;

@@ -9,15 +9,15 @@
 //! in a space scaled by each monitor's scale factor; `XSpace` converts at
 //! this boundary so callers never see X pixels.
 use crate::{keymap::CONTROL_KEYSYMS, wayland_capture::write_png};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use std::{path::Path, time::Duration};
-use unimation::{
+use actuate::{
     Delivery, KeyChord, KeyboardInput, Modifiers, MouseButton, NativeError, Point, PointerAction,
     PointerInput, Receipt, Result, TextInput,
     geometry::{FrameMapping, Rect},
     motion::MotionPlan,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::{path::Path, time::Duration};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -430,7 +430,7 @@ impl X11 {
             .iter()
             .flat_map(|px| [px[2], px[1], px[0], 255])
             .collect();
-        let path = unimation::image::absolute_output(path)?;
+        let path = actuate::image::absolute_output(path)?;
         write_png(&path, u32::from(w), u32::from(h), &rgba)?;
         let revision = serde_json::to_string(&record).map_err(fail)?;
         Ok(crate::wayland_capture::Frame {

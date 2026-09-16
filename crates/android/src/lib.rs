@@ -8,8 +8,8 @@ pub mod jsonl;
 pub mod qr;
 pub mod session;
 pub mod wireless;
+use actuate::{Effect, NativeError, Receipt, Result};
 use std::{io::Write, time::Duration};
-use unimation::{Effect, NativeError, Receipt, Result};
 fn error(code: &str, message: impl ToString, effect: Effect) -> NativeError {
     NativeError::new(code, message).with_effect(effect)
 }
@@ -120,7 +120,7 @@ impl<D: CommandTransport> Android<D> {
     }
     pub fn capture_png(&mut self) -> Result<Vec<u8>> {
         let bytes = self.run("screencap -p", 64 * 1024 * 1024)?;
-        unimation::image::png_dimensions(&bytes).map_err(|e| {
+        actuate::image::png_dimensions(&bytes).map_err(|e| {
             error(
                 "android_capture",
                 format!("device did not return a PNG: {e}"),
@@ -202,7 +202,7 @@ impl Write for LimitedOutput {
         Ok(())
     }
 }
-impl<D: CommandTransport> unimation::Capture for Android<D> {
+impl<D: CommandTransport> actuate::Capture for Android<D> {
     type Request = ();
     type Frame = Vec<u8>;
     fn capture(&mut self, _: ()) -> Result<Vec<u8>> {

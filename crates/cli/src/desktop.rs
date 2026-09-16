@@ -7,7 +7,7 @@ use windows::WindowsSession;
 pub(super) fn run_host(
     command: Command,
     connection: Connection,
-    format: unimation::OutputFormat,
+    format: actuate::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !matches!(connection.provider, Provider::Native | Provider::Windows) {
         return Err("Selected provider is not the Windows host".into());
@@ -21,14 +21,14 @@ pub(super) fn run_host(
     let mut session = WindowsSession::new()?;
     match command {
         Command::Session {} => {
-            unimation::transport::serve(
+            actuate::transport::serve(
                 std::io::stdin().lock(),
                 std::io::stdout().lock(),
                 format,
                 |request| {
                     session
                         .dispatch(request)
-                        .map(unimation::transport::ValueReply::from)
+                        .map(actuate::transport::ValueReply::from)
                 },
             )?;
             Ok(())
@@ -36,11 +36,11 @@ pub(super) fn run_host(
         Command::Discover { scope } => {
             let raw = session.dispatch(json!({"op":"discover"}))?;
             let scope = match scope {
-                DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
-                DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
+                DiscoveryScope::All => actuate::discovery::DiscoveryScope::All,
+                DiscoveryScope::Apps => actuate::discovery::DiscoveryScope::Apps,
             };
             emit_pretty(
-                &unimation::discovery::present_discovery(&raw, scope, format),
+                &actuate::discovery::present_discovery(&raw, scope, format),
                 format,
             )
         }
@@ -68,7 +68,7 @@ pub(super) fn run_host(
             emit_snapshot(
                 &snapshot,
                 format,
-                &unimation::presentation::PresentationOptions {
+                &actuate::presentation::PresentationOptions {
                     actionable_only: interactive,
                     hide_known_hidden: hide_hidden,
                     max_nodes: limit,

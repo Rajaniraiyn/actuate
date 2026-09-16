@@ -3,15 +3,15 @@ use crate::{
     SimulatorAccessibility, SimulatorScope,
     providers::{LazySimulatorInput, SimulatorFrame, SimulatorServices},
 };
+use actuate::{
+    presentation::PresentationOptions,
+    session::{Rendered, SnapshotHistory},
+    *,
+};
 use serde::Deserialize;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-};
-use unimation::{
-    presentation::PresentationOptions,
-    session::{Rendered, SnapshotHistory},
-    *,
 };
 
 #[derive(Deserialize)]
@@ -190,7 +190,7 @@ impl<B: SessionBackend> Session<B> {
                 before,
                 after,
                 options,
-            } => Ok(Response::Text(unimation::presentation::render_view_diff(
+            } => Ok(Response::Text(actuate::presentation::render_view_diff(
                 self.snapshot(Some(before))?,
                 self.snapshot(after)?,
                 &options,

@@ -9,7 +9,7 @@ import time
 
 class Session:
     def __init__(self):
-        self.p = subprocess.Popen(['target/debug/unimation', 'session', '--json'], stdin=subprocess.PIPE,
+        self.p = subprocess.Popen(['target/debug/actuate', 'session', '--json'], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, text=True, bufsize=1)
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.p.stdout, selectors.EVENT_READ)
@@ -80,14 +80,14 @@ def test_fixture(s):
         deadline=time.monotonic()+5
         while True:
             tree=s.result(op='observe',request={'pid':fixture.pid})
-            fields=[n for n in tree['nodes'] if value(n,'AXIdentifier')=='unimation-test-field']
+            fields=[n for n in tree['nodes'] if value(n,'AXIdentifier')=='actuate-test-field']
             if fields: break
             if time.monotonic()>deadline: raise AssertionError('Fixture text field not discovered')
             time.sleep(.05)
         target=fields[0]['reference']
-        s.result(op='semantic',target=target,action={'kind':'set_string','attribute':'AXValue','value':'Unimation 🦀'})
+        s.result(op='semantic',target=target,action={'kind':'set_string','attribute':'AXValue','value':'Actuate 🦀'})
         actual=s.result(op='attribute',target=target,name='AXValue')
-        assert actual['value']=='Unimation 🦀', actual
+        assert actual['value']=='Actuate 🦀', actual
         s.result(op='semantic',target=target,action={'kind':'set_bool','attribute':'AXFocused','value':True})
         assert s.result(op='attribute',target=target,name='AXFocused')['value'] is True
         print('PASS fixture Unicode value setting and boolean focus setting')
@@ -103,8 +103,8 @@ def test_fixture(s):
         await_value('Hi🦀')
         print('PASS process-directed Unicode keyboard events consumed by focused fixture')
         tree=s.result(op='observe',request={'pid':fixture.pid})
-        button=next(n for n in tree['nodes'] if value(n,'AXIdentifier')=='unimation-test-button')
-        scroll=next(n for n in tree['nodes'] if value(n,'AXIdentifier')=='unimation-test-scroll')
+        button=next(n for n in tree['nodes'] if value(n,'AXIdentifier')=='actuate-test-button')
+        scroll=next(n for n in tree['nodes'] if value(n,'AXIdentifier')=='actuate-test-scroll')
         def center(n):
             pos=n['attributes']['AXPosition']; size=n['attributes']['AXSize']
             return {'x':pos['x']+size['width']/2,'y':pos['y']+size['height']/2}

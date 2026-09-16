@@ -1,5 +1,5 @@
+use actuate::Result;
 use serde::Serialize;
-use unimation::Result;
 use windows_api::{
     Win32::{
         Foundation::{HWND, LPARAM, RECT},
@@ -182,8 +182,8 @@ pub fn displays() -> Result<serde_json::Value> {
 
 #[derive(Default)]
 pub struct WindowDiscovery;
-impl unimation::Discover for WindowDiscovery {
-    fn discover(&mut self) -> unimation::Result<serde_json::Value> {
+impl actuate::Discover for WindowDiscovery {
+    fn discover(&mut self) -> actuate::Result<serde_json::Value> {
         let windows = discover_windows()?;
         let mut applications = std::collections::BTreeMap::<u32, serde_json::Value>::new();
         for window in &windows {

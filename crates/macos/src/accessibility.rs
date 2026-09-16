@@ -1,4 +1,5 @@
 use crate::error;
+use actuate::*;
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
     CFArray, CFAttributedString, CFBoolean, CFNumber, CFRange, CFRetained, CFString, CFType,
@@ -12,7 +13,6 @@ use std::{
     ptr::{self, NonNull},
     rc::Rc,
 };
-use unimation::*;
 
 /// One reference namespace. References are never reused or structurally rebound.
 /// Drop the provider to release its retained objects. Event-based retirement is pending.

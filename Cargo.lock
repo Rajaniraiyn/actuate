@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "actuate"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -48,6 +56,7 @@ dependencies = [
 name = "android"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "async-trait",
  "droidmux",
  "mdns-sd",
@@ -57,7 +66,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "unimation",
 ]
 
 [[package]]
@@ -335,13 +343,13 @@ dependencies = [
 name = "cli"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "android",
  "ios",
  "linux",
  "macos",
  "serde",
  "serde_json",
- "unimation",
  "usage-rs",
  "windows 0.1.0",
 ]
@@ -350,11 +358,11 @@ dependencies = [
 name = "compositor"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "memmap2",
  "rustix",
  "serde",
  "serde_json",
- "unimation",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-misc",
@@ -1010,6 +1018,7 @@ dependencies = [
 name = "ios"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "block2",
  "idevice",
  "imagesize",
@@ -1020,7 +1029,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "unimation",
  "usage-rs",
 ]
 
@@ -1087,6 +1095,7 @@ dependencies = [
 name = "linux"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "async-io",
  "compositor",
  "futures-lite",
@@ -1096,7 +1105,6 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
- "unimation",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-misc",
@@ -1131,6 +1139,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 name = "macos"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "block2",
  "libc",
  "objc2",
@@ -1144,7 +1153,6 @@ dependencies = [
  "overlay",
  "serde",
  "serde_json",
- "unimation",
 ]
 
 [[package]]
@@ -1407,6 +1415,7 @@ dependencies = [
 name = "overlay"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "block2",
  "compositor",
  "libc",
@@ -1420,7 +1429,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tiny-skia",
- "unimation",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
@@ -2301,14 +2309,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
-name = "unimation"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "universal-hash"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2522,11 +2522,11 @@ dependencies = [
 name = "windows"
 version = "0.1.0"
 dependencies = [
+ "actuate",
  "overlay",
  "png",
  "serde",
  "serde_json",
- "unimation",
  "windows 0.62.2",
 ]
 

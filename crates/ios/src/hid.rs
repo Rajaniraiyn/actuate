@@ -2,6 +2,7 @@
 //! The MouseNSEvent symbol creates guest touch contacts, not a guest mouse cursor.
 //! Private message layout follows the observed idb/accessibility-cli transport.
 #![allow(unsafe_op_in_unsafe_fn)]
+use actuate::{Effect, NativeError, Receipt, Result};
 use block2::{Block, RcBlock};
 use objc2::{
     msg_send,
@@ -18,7 +19,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use unimation::{Effect, NativeError, Receipt, Result};
 fn error(code: &str, message: impl Into<String>, effect: Effect) -> NativeError {
     NativeError {
         code: code.into(),
@@ -303,8 +303,7 @@ impl SimulatorHid {
                     Effect::None,
                 ));
             }
-            let queue =
-                dispatch_queue_create(c"unimation.simulator.hid".as_ptr(), std::ptr::null());
+            let queue = dispatch_queue_create(c"actuate.simulator.hid".as_ptr(), std::ptr::null());
             if queue.is_null() {
                 return Err(error(
                     "allocation_failed",
@@ -472,12 +471,12 @@ impl SimulatorHid {
             ));
         }
         let steps = (duration_ms / 16).clamp(1, 600) as usize;
-        let plan = unimation::motion::MotionPlan::new(
+        let plan = actuate::motion::MotionPlan::new(
             from,
             to,
             Duration::from_millis(duration_ms),
             steps,
-            unimation::motion::MotionStyle::Straight,
+            actuate::motion::MotionStyle::Straight,
         )?;
         self.touch_path(&plan, edge)
     }
@@ -486,7 +485,7 @@ impl SimulatorHid {
     /// not mouse hover; failure triggers one best-effort contact release only.
     pub fn touch_path(
         &mut self,
-        plan: &unimation::motion::MotionPlan,
+        plan: &actuate::motion::MotionPlan,
         edge: TouchEdge,
     ) -> Result<Receipt> {
         let samples = plan.samples();
@@ -611,11 +610,11 @@ fn touch_packet(template: &[u8], point: (f64, f64), down: bool, time: u64) -> [u
     bytes[0xb4..0xb8].copy_from_slice(&2u32.to_ne_bytes());
     bytes
 }
-impl unimation::TouchInput for SimulatorHid {
-    fn touch(&mut self, action: unimation::TouchAction) -> Result<Receipt> {
+impl actuate::TouchInput for SimulatorHid {
+    fn touch(&mut self, action: actuate::TouchAction) -> Result<Receipt> {
         match action {
-            unimation::TouchAction::Tap { point } => self.tap_ratio(point.x(), point.y()),
-            unimation::TouchAction::Swipe {
+            actuate::TouchAction::Tap { point } => self.tap_ratio(point.x(), point.y()),
+            actuate::TouchAction::Swipe {
                 from,
                 to,
                 duration_ms,
@@ -625,22 +624,22 @@ impl unimation::TouchInput for SimulatorHid {
                 (to.x(), to.y()),
                 duration_ms,
                 match edge {
-                    unimation::TouchEdge::None => TouchEdge::None,
-                    unimation::TouchEdge::Left => TouchEdge::Left,
-                    unimation::TouchEdge::Top => TouchEdge::Top,
-                    unimation::TouchEdge::Bottom => TouchEdge::Bottom,
-                    unimation::TouchEdge::Right => TouchEdge::Right,
+                    actuate::TouchEdge::None => TouchEdge::None,
+                    actuate::TouchEdge::Left => TouchEdge::Left,
+                    actuate::TouchEdge::Top => TouchEdge::Top,
+                    actuate::TouchEdge::Bottom => TouchEdge::Bottom,
+                    actuate::TouchEdge::Right => TouchEdge::Right,
                 },
             ),
         }
     }
 }
-impl unimation::HardwareButtons for SimulatorHid {
-    fn press_button(&mut self, button: unimation::HardwareButton) -> Result<Receipt> {
+impl actuate::HardwareButtons for SimulatorHid {
+    fn press_button(&mut self, button: actuate::HardwareButton) -> Result<Receipt> {
         match button {
-            unimation::HardwareButton::Home => self.press_hardware(HardwareButton::Home, 50),
-            unimation::HardwareButton::Lock => self.press_hardware(HardwareButton::Lock, 50),
-            unimation::HardwareButton::VolumeUp | unimation::HardwareButton::VolumeDown => {
+            actuate::HardwareButton::Home => self.press_hardware(HardwareButton::Home, 50),
+            actuate::HardwareButton::Lock => self.press_hardware(HardwareButton::Lock, 50),
+            actuate::HardwareButton::VolumeUp | actuate::HardwareButton::VolumeDown => {
                 let f = self.arbitrary_message.ok_or_else(|| {
                     error(
                         "private_api_unavailable",
@@ -648,7 +647,7 @@ impl unimation::HardwareButtons for SimulatorHid {
                         Effect::None,
                     )
                 })?;
-                let usage = if matches!(button, unimation::HardwareButton::VolumeUp) {
+                let usage = if matches!(button, actuate::HardwareButton::VolumeUp) {
                     0xe9
                 } else {
                     0xea
@@ -665,7 +664,7 @@ impl unimation::HardwareButtons for SimulatorHid {
         }
     }
 }
-impl unimation::HidKeyboard for SimulatorHid {
+impl actuate::HidKeyboard for SimulatorHid {
     fn press_usage(&mut self, usage: u16, modifiers: &[u16]) -> Result<Receipt> {
         self.key(usage, modifiers)
     }

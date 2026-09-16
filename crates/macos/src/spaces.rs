@@ -1,13 +1,13 @@
 //! Read-only Space discovery. IDs are session-local WindowServer identities,
 //! not Mission Control ordinals. Unsupported private APIs report unknown state.
 use crate::{capture, error};
+use actuate::{Effect, NativeError, Result};
 use objc2_core_foundation::{
     CFArray, CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFUUID,
 };
 use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
 use serde::{Deserialize, Serialize};
 use std::{ffi::c_void, ptr::NonNull};
-use unimation::{Effect, NativeError, Result};
 
 type DisplayUuid = unsafe extern "C" fn(u32) -> *mut CFUUID;
 type Connection = unsafe extern "C" fn() -> i32;

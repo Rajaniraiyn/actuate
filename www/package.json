@@ -1,0 +1,15 @@
+{
+  "name": "actuate-www",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun ./node_modules/blume/bin/blume.mjs dev",
+    "build": "bun ./node_modules/blume/bin/blume.mjs build",
+    "preview": "bun ./node_modules/blume/bin/blume.mjs preview",
+    "validate": "bun ./node_modules/blume/bin/blume.mjs validate",
+    "audit": "bun ./node_modules/blume/bin/blume.mjs audit"
+  },
+  "packageManager": "bun@1.4.0",
+  "engines": { "bun": ">=1.4.0" },
+  "dependencies": { "blume": "1.7.0" }
+}

@@ -4,6 +4,7 @@ use crate::{
     capture::{CaptureRequest, CaptureSource, Frame, current_revision, displays, windows},
     error,
 };
+use actuate::{Capture, Effect, Result, geometry::FrameMapping};
 use block2::RcBlock;
 use objc2::{AllocAnyThread, available};
 use objc2_core_foundation::{CFMutableData, CFString};
@@ -14,7 +15,6 @@ use objc2_screen_capture_kit::{
     SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
 };
 use std::{io::Write, sync::mpsc, time::Duration};
-use unimation::{Capture, Effect, Result, geometry::FrameMapping};
 
 /// `max_pixel_edge` requests proportional downscaling by ScreenCaptureKit.
 /// None uses the filter's reported point-to-pixel scale. No route falls back implicitly.
@@ -22,7 +22,7 @@ use unimation::{Capture, Effect, Result, geometry::FrameMapping};
 pub struct NativeScreenshotCapture {
     pub max_pixel_edge: Option<u32>,
 }
-fn fail(message: impl ToString) -> unimation::NativeError {
+fn fail(message: impl ToString) -> actuate::NativeError {
     error("native_capture_failed", message, Effect::None)
 }
 fn dimensions(width: f64, height: f64, scale: f64, limit: Option<u32>) -> Result<(usize, usize)> {
