@@ -116,3 +116,30 @@ Native errors propagate unchanged and no input operation is retried.
 macOS accepts an explicit application PID as its observation scope;
 iOS Simulator uses its existing `SimulatorScope`. This wait API currently belongs
 to the Rust library, not a new CLI command or a claimed notification provider.
+
+
+## Shared motion and persistent connections
+
+`unimation::motion::MotionPlan` generates timed absolute samples;
+`RelativeMotionPlan` generates bounded integer HID reports with exact total counts.
+Both use the same eased Bézier geometry as the overlay. Coordinate units belong to
+the caller; Android mouse acceleration means HID counts are not screen pixels.
+Android and simulator mouse adapters expose `move_smooth`; simulator touch exposes
+`touch_path` with full normalized-coordinate validation before contact.
+
+A live Android `Pointer` also implements `CommandTransport`. For example,
+`Android::new(&mut pointer).capture_png()` opens a logical shell stream on the
+same ADB connection while the HID stream remains alive. No second TLS connection
+is needed. Borrowed transports allow wrappers to share a session without taking
+ownership or reconnecting. The HID example demonstrates this composition.
+
+Keep the CLI's JSONL `session` process open for an entire task. All requests in
+that process reuse its selected connection; EOF tears it down. Separate one-shot
+CLI processes currently create separate connections. Named-session reuse across
+independent invocations is a future CLI feature, not an implicit existing daemon.
+Any reconnect layer must invalidate uncertain stream state and never replay an
+input operation whose effect is unknown.
+
+Idle float is an overlay-only drawing offset. It never dispatches HID reports or
+changes input targets. Reduced motion disables it. Its portable configuration can
+be shared by future Windows/Linux renderers; those renderers remain stubs.

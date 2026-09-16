@@ -172,6 +172,41 @@ impl SimulatorPointer {
     pub fn move_relative(&mut self, dx: f64, dy: f64) -> Result<Receipt> {
         self.dispatch(dx, dy, self.buttons)
     }
+    /// Follow a shared relative-count plan using the explicitly enabled guest mouse.
+    /// Guest acceleration still determines the screen endpoint. Held buttons remain
+    /// held, and a failed sample is never retried.
+    pub fn move_smooth(&mut self, plan: &unimation::motion::RelativeMotionPlan) -> Result<Receipt> {
+        if !self.enabled {
+            return Err(error(
+                "not_enabled",
+                "Enable the guest mouse service first",
+                Effect::None,
+            ));
+        }
+        let start = std::time::Instant::now();
+        let mut dispatched = false;
+        for sample in plan.samples() {
+            if let Some(wait) = sample.at.checked_sub(start.elapsed()) {
+                std::thread::sleep(wait);
+            }
+            self.move_relative(f64::from(sample.dx), f64::from(sample.dy))
+                .map_err(|mut failure| {
+                    if dispatched {
+                        failure.effect = Effect::Unknown;
+                    }
+                    failure
+                })?;
+            dispatched = true;
+        }
+        Ok(Receipt {
+            effect: if dispatched {
+                Effect::Dispatched
+            } else {
+                Effect::None
+            },
+            route: "ios.simulator.indigo.mouse".into(),
+        })
+    }
     pub fn button(&mut self, button: u8, down: bool) -> Result<Receipt> {
         if !(1..=8).contains(&button) {
             return Err(error(

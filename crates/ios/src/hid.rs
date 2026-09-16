@@ -471,25 +471,47 @@ impl SimulatorHid {
                 Effect::None,
             ));
         }
+        let steps = (duration_ms / 16).clamp(1, 600) as usize;
+        let plan = unimation::motion::MotionPlan::new(
+            from,
+            to,
+            Duration::from_millis(duration_ms),
+            steps,
+            unimation::motion::MotionStyle::Straight,
+        )?;
+        self.touch_path(&plan, edge)
+    }
+    /// Follow a shared path whose coordinates are normalized framebuffer ratios.
+    /// All positions are validated before contact begins. This is a touch gesture,
+    /// not mouse hover; failure triggers one best-effort contact release only.
+    pub fn touch_path(
+        &mut self,
+        plan: &unimation::motion::MotionPlan,
+        edge: TouchEdge,
+    ) -> Result<Receipt> {
+        let samples = plan.samples();
+        for sample in samples {
+            validate_ratio(sample.position)?;
+        }
+        let from = plan.start();
+        let to = plan.end();
+        validate_ratio(from)?;
+        validate_ratio(to)?;
         if let Err(e) = self.contact(from, true, edge) {
             let _ = self.contact(from, false, edge);
             return Err(after_dispatch(e));
         }
-        let steps = (duration_ms / 16).clamp(1, 600);
         let start = Instant::now();
-        for i in 1..=steps {
-            let fraction = i as f64 / steps as f64;
-            let expected = Duration::from_millis(duration_ms * i / steps);
-            if let Some(wait) = expected.checked_sub(start.elapsed()) {
+        for sample in samples {
+            if sample.at.is_zero() && sample.position == from {
+                continue;
+            }
+            if let Some(wait) = sample.at.checked_sub(start.elapsed()) {
                 std::thread::sleep(wait);
             }
-            let p = (
-                from.0 + (to.0 - from.0) * fraction,
-                from.1 + (to.1 - from.1) * fraction,
-            );
-            if let Err(mut failure) = self.contact(p, true, edge) {
+            if let Err(mut failure) = self.contact(sample.position, true, edge) {
                 failure.effect = Effect::Unknown;
-                let _ = self.contact(p, false, edge);
+                let _ = self.contact(sample.position, false, edge);
                 return Err(failure);
             }
         }
