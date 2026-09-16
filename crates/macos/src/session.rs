@@ -12,16 +12,12 @@ use crate::{
     skylight::*,
 };
 use serde_json::{Value, json};
-use std::{collections::VecDeque, path::PathBuf};
-use unimation::*;
+use std::{path::PathBuf, sync::Arc};
+use unimation::{
+    session::{ActionEpoch, FrameHistory, SnapshotHistory, wait_attribute},
+    *,
+};
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SnapshotScope {
-    #[default]
-    Application,
-    FocusedWindow,
-}
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MacRequest {
@@ -93,19 +89,14 @@ pub struct MacSession {
     ax: Accessibility,
     input: QuartzInput,
     sky: Option<SkyLightInput>,
-    overlay: Option<crate::overlay::OverlayController>,
+    overlay: Option<overlay::OverlayController>,
     overlay_error: Option<NativeError>,
-    snapshots: VecDeque<Snapshot>,
-    frames: VecDeque<(u64, Frame, u64)>,
-    next_frame: u64,
-    action_epoch: u64,
+    snapshots: SnapshotHistory,
+    frames: FrameHistory<Frame>,
+    epoch: ActionEpoch,
 }
 fn fail(code: &str, message: &str) -> NativeError {
-    NativeError {
-        code: code.into(),
-        message: message.into(),
-        effect: Effect::None,
-    }
+    NativeError::new(code, message)
 }
 impl MacSession {
     pub fn new() -> Self {
@@ -115,31 +106,16 @@ impl MacSession {
             sky: None,
             overlay: None,
             overlay_error: None,
-            snapshots: VecDeque::new(),
-            frames: VecDeque::new(),
-            next_frame: 1,
-            action_epoch: 0,
+            snapshots: SnapshotHistory::default(),
+            frames: FrameHistory::default(),
+            epoch: ActionEpoch::default(),
         }
     }
-    fn snapshot(&self, revision: Option<u64>) -> Result<&Snapshot> {
-        match revision {
-            Some(r) => self.snapshots.iter().find(|s| s.revision == r),
-            None => self.snapshots.back(),
-        }
-        .ok_or_else(|| {
-            fail(
-                "unknown_snapshot",
-                "Snapshot not retained; session retains the latest 32 observations",
-            )
-        })
+    fn snapshot(&self, revision: Option<u64>) -> Result<&Arc<Snapshot>> {
+        self.snapshots.get(revision)
     }
     fn remember(&mut self, snapshot: Snapshot) -> Value {
-        let result = json!(snapshot);
-        self.snapshots.push_back(snapshot);
-        if self.snapshots.len() > 32 {
-            self.snapshots.pop_front();
-        }
-        result
+        json!(self.snapshots.remember(snapshot).as_ref())
     }
     fn sky_target(&mut self, target: &ElementRef, point: Point) -> Result<SkyLightTarget> {
         let window = self.ax.native_window(target)?;
@@ -228,19 +204,9 @@ impl MacSession {
         }
         match mode {
             ClickMode::Semantic => {
-                if button != MouseButton::Left || count != 1 || modifiers != Modifiers::default() {
-                    return Err(fail(
-                        "unsupported",
-                        "Semantic activation has no mouse button/count/modifier semantics",
-                    ));
-                }
+                let target = ClickMode::require_semantic_target(target, button, count, modifiers)?;
                 self.ax.semantic(
-                    target.ok_or_else(|| {
-                        fail(
-                            "invalid_request",
-                            "Semantic activation requires a reference",
-                        )
-                    })?,
+                    target,
                     SemanticAction::Perform {
                         name: "AXPress".into(),
                     },
@@ -293,15 +259,7 @@ impl MacSession {
         }
     }
     pub fn dispatch(&mut self, mut value: Value) -> Result<Value> {
-        if let Some(object) = value.as_object_mut() {
-            object.remove("id");
-        }
-        for pointer in ["/target", "/options/root"] {
-            if let Some(short) = value.pointer(pointer).and_then(Value::as_str) {
-                let expanded = json!(self.ax.expand_reference(short)?);
-                *value.pointer_mut(pointer).expect("existing field") = expanded;
-            }
-        }
+        transport::prepare(&mut value, || Ok(self.ax.session_id().to_owned()))?;
         let extension = matches!(
             value["op"].as_str(),
             Some(
@@ -328,73 +286,106 @@ impl MacSession {
             serde_json::from_value(value).map_err(|e| fail("invalid_request", &e.to_string()))?;
         self.dispatch_core(request)
     }
-    fn record_effect(&mut self, result: &Result<Value>) {
-        let changed = match result {
-            Ok(v) => matches!(
-                v.get("effect").and_then(Value::as_str),
-                Some("dispatched" | "unknown")
-            ),
-            Err(e) => matches!(e.effect, Effect::Dispatched | Effect::Unknown),
-        };
-        if changed {
-            self.action_epoch = self.action_epoch.wrapping_add(1);
-        }
-    }
     pub fn dispatch_core(&mut self, request: SessionRequest) -> Result<Value> {
         let result = self.execute_core(request);
-        self.record_effect(&result);
+        self.epoch.record(&result);
         result
     }
     fn execute_core(&mut self, request: SessionRequest) -> Result<Value> {
         match request {
-            SessionRequest::View { revision, options, format } => {
-                let snapshot = self.snapshot(revision)?;
-                if format == OutputFormat::Json { return Ok(json!(snapshot)); }
-                let view = presentation::render_snapshot(snapshot, &options)?;
-                Ok(match format {
-                    OutputFormat::Text => json!(presentation::render_snapshot_text(&view)),
-                    _ => json!(view),
-                })
-            },
-            SessionRequest::DiffView { before, after, options, max_changes } => {
-                Ok(json!(presentation::render_view_diff(self.snapshot(Some(before))?, self.snapshot(after)?, &options, max_changes)?))
-            },
-            SessionRequest::ParameterizedAttribute{target,name,parameter}=>self.ax.read_parameterized(&target,&name,parameter),
-            SessionRequest::WaitAttribute{target,name,expected,timeout_ms}=>{
-                if timeout_ms>60_000{return Err(fail("invalid_request","Wait timeout must be <=60000ms"));}
-                let start=std::time::Instant::now();
-                loop {
-                    let value=self.ax.read_attribute(&target,&name);
-                    let matched=value.as_ref().is_ok_and(|v|*v==expected);
-                    if matched || start.elapsed().as_millis()>=timeout_ms as u128{
-                        return Ok(json!({"matched":matched,"elapsed_ms":start.elapsed().as_millis(),"value":value.as_ref().ok(),"error":value.err()}));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(25));
-                }
+            SessionRequest::View {
+                revision,
+                options,
+                format,
+            } => Ok(json!(session::render(
+                self.snapshot(revision)?.clone(),
+                format,
+                &options
+            )?)),
+            SessionRequest::DiffView {
+                before,
+                after,
+                options,
+                max_changes,
+            } => Ok(json!(presentation::render_view_diff(
+                self.snapshot(Some(before))?,
+                self.snapshot(after)?,
+                &options,
+                max_changes
+            )?)),
+            SessionRequest::ParameterizedAttribute {
+                target,
+                name,
+                parameter,
+            } => self.ax.read_parameterized(&target, &name, parameter),
+            SessionRequest::WaitAttribute {
+                target,
+                name,
+                expected,
+                timeout_ms,
+            } => wait_attribute(timeout_ms, &expected, || {
+                self.ax.read_attribute(&target, &name)
+            }),
+            SessionRequest::Discover { scope, format } => self
+                .ax
+                .discover()
+                .map(|raw| discovery::present_discovery(&raw, scope, format)),
+            SessionRequest::Observe { request } => {
+                let s = self.ax.observe(request)?;
+                Ok(self.remember(s))
             }
-            SessionRequest::Discover{scope,format}=>self.ax.discover().map(|raw|discovery::present_discovery(&raw,scope,format)),
-            SessionRequest::Observe{request}=>{let s=self.ax.observe(request)?;Ok(self.remember(s))},
-            SessionRequest::ObserveSubtree{target,max_nodes,max_depth}=>{let s=self.ax.observe_subtree(&target,max_nodes,max_depth)?;Ok(self.remember(s))},
-            SessionRequest::Inspect{target}=>self.ax.inspect(&target),
-            SessionRequest::Attribute{target,name}=>self.ax.read_attribute(&target,&name),
-            SessionRequest::Semantic{target,action}=>self.ax.semantic(&target,action).map(|r|json!(r)),
-            SessionRequest::Pointer{delivery,action}=>self.input.pointer(delivery,action).map(|r|json!(r)),
-            SessionRequest::Text{delivery,text}=>self.input.type_text(delivery,&text).map(|r|json!(r)),
-            SessionRequest::Key{delivery,chord}=>self.input.key_press(delivery,chord).map(|r|json!(r)),
-            SessionRequest::HitTest{point}=>self.ax.hit_test(point).map(|r|json!(r)),
-            SessionRequest::Window{target}=>self.ax.native_window(&target).map(|r|json!(r)),
-            SessionRequest::Click{target,mode,button,count,modifiers}=>{
-                let point=if matches!(mode,ClickMode::Semantic){Point{x:0.,y:0.}}else{self.ax.element_center(&target)?};
-                self.click_at(Some(&target),point,mode,button,count,modifiers).map(|r|json!(r))
+            SessionRequest::ObserveSubtree {
+                target,
+                max_nodes,
+                max_depth,
+            } => {
+                let s = self.ax.observe_subtree(&target, max_nodes, max_depth)?;
+                Ok(self.remember(s))
             }
-            SessionRequest::Diff{before,after}=>diff::diff_snapshots(self.snapshot(Some(before))?,self.snapshot(after)?).map(|d|json!(d)),
-            SessionRequest::Query{revision,query}=>Ok(json!(query::query_nodes(self.snapshot(revision)?,&query))),
-            SessionRequest::Snapshots{}=>Ok(json!(self.snapshots.iter().map(|s|json!({"revision":s.revision,"root":s.root,"complete":s.complete,"traversal_complete":s.traversal_complete})).collect::<Vec<_>>())),
+            SessionRequest::Inspect { target } => self.ax.inspect(&target),
+            SessionRequest::Attribute { target, name } => self.ax.read_attribute(&target, &name),
+            SessionRequest::Semantic { target, action } => {
+                self.ax.semantic(&target, action).map(|r| json!(r))
+            }
+            SessionRequest::Pointer { delivery, action } => {
+                self.input.pointer(delivery, action).map(|r| json!(r))
+            }
+            SessionRequest::Text { delivery, text } => {
+                self.input.type_text(delivery, &text).map(|r| json!(r))
+            }
+            SessionRequest::Key { delivery, chord } => {
+                self.input.key_press(delivery, chord).map(|r| json!(r))
+            }
+            SessionRequest::HitTest { point } => self.ax.hit_test(point).map(|r| json!(r)),
+            SessionRequest::Window { target } => self.ax.native_window(&target).map(|r| json!(r)),
+            SessionRequest::Click {
+                target,
+                mode,
+                button,
+                count,
+                modifiers,
+            } => {
+                let point = if matches!(mode, ClickMode::Semantic) {
+                    Point { x: 0., y: 0. }
+                } else {
+                    self.ax.element_center(&target)?
+                };
+                self.click_at(Some(&target), point, mode, button, count, modifiers)
+                    .map(|r| json!(r))
+            }
+            SessionRequest::Diff { before, after } => {
+                diff::diff_snapshots(self.snapshot(Some(before))?, self.snapshot(after)?)
+                    .map(|d| json!(d))
+            }
+            SessionRequest::Query { revision, query } => {
+                Ok(json!(query::query_nodes(self.snapshot(revision)?, &query)))
+            }
+            SessionRequest::Snapshots {} => Ok(json!(self.snapshots.summaries())),
         }
     }
     pub fn extension(&mut self, request: MacRequest) -> Result<Value> {
         let result = self.execute_extension(request);
-        self.record_effect(&result);
+        self.epoch.record(&result);
         result
     }
     fn execute_extension(&mut self, request: MacRequest) -> Result<Value> {
@@ -425,18 +416,8 @@ impl MacSession {
                             .observe_subtree(&reference, request.max_nodes, request.max_depth)?
                     }
                 };
-                let result = if format == OutputFormat::Json {
-                    json!(snapshot)
-                } else {
-                    let view = presentation::render_snapshot(&snapshot, &options)?;
-                    if format == OutputFormat::Text {
-                        json!(presentation::render_snapshot_text(&view))
-                    } else {
-                        json!(view)
-                    }
-                };
-                self.remember(snapshot);
-                Ok(result)
+                let snapshot = self.snapshots.remember(snapshot);
+                Ok(json!(session::render(snapshot, format, &options)?))
             }
             MacRequest::Actionability { target } => self.ax.actionability(&target),
             MacRequest::CursorState {} => {
@@ -450,7 +431,7 @@ impl MacSession {
                     "consumption_verified": false,
                     "overlay_running": alive,
                     "overlay_configured": self.overlay.is_some(),
-                    "overlay_pid": self.overlay.as_ref().and_then(crate::overlay::OverlayController::pid),
+                    "overlay_pid": self.overlay.as_ref().and_then(overlay::OverlayController::pid),
                     "overlay_error": self.overlay_error,
                     "overlay_acknowledgement": "queued_only"
                 }))
@@ -464,7 +445,7 @@ impl MacSession {
                                 "Stop the current overlay before replacing it",
                             ));
                         }
-                        self.overlay = Some(crate::overlay::OverlayController::start(executable)?);
+                        self.overlay = Some(overlay::OverlayController::start(executable)?);
                         self.overlay_error = None;
                     }
                     CursorOverlayAction::Stop {} => {
@@ -477,7 +458,7 @@ impl MacSession {
                 Ok(json!({"overlay_running":self.overlay.is_some(),"render_acknowledged":false}))
             }
             MacRequest::Capabilities {} => Ok(
-                json!({"skylight":SkyLightInput::capabilities(),"snapshots_retained":32,"frames_retained":32,"quartz":{"global":true,"process":true,"consumption_verified":false}}),
+                json!({"skylight":SkyLightInput::capabilities(),"snapshots_retained":self.snapshots.capacity(),"frames_retained":self.frames.capacity(),"quartz":{"global":true,"process":true,"consumption_verified":false}}),
             ),
             MacRequest::Displays {} => capture::displays().map(|v| json!(v)),
             MacRequest::Windows {} => crate::spaces::windows().map(|v| json!(v)),
@@ -513,13 +494,8 @@ impl MacSession {
                         ScreenshotCapture.capture(request)?
                     }
                 };
-                let id = self.next_frame;
-                self.next_frame += 1;
-                let result = json!({"frame_id":id,"frame":frame});
-                self.frames.push_back((id, frame, self.action_epoch));
-                if self.frames.len() > 32 {
-                    self.frames.pop_front();
-                }
+                let mut result = json!({"frame":frame});
+                result["frame_id"] = json!(self.frames.remember(frame, self.epoch));
                 Ok(result)
             }
             MacRequest::ClickImage {
@@ -529,17 +505,7 @@ impl MacSession {
                 button,
                 count,
             } => {
-                let (_, frame, epoch) = self
-                    .frames
-                    .iter()
-                    .find(|(id, _, _)| *id == frame)
-                    .ok_or_else(|| fail("unknown_frame", "Frame not retained in this session"))?;
-                if *epoch != self.action_epoch {
-                    return Err(fail(
-                        "stale_frame",
-                        "Session dispatched input since this capture; capture again before an image click",
-                    ));
-                }
+                let frame = self.frames.get(frame, self.epoch)?;
                 let point = frame
                     .mapping
                     .pixel_to_global(point, &capture::current_revision(&frame.source)?)?;
@@ -641,19 +607,7 @@ impl MacSession {
                 }
                 self.ax.require_pointer_access(&target)?;
                 let w = self.ax.native_window(&target)?;
-                if !point.x.is_finite()
-                    || !point.y.is_finite()
-                    || point.x < 0.
-                    || point.y < 0.
-                    || point.x >= w.bounds.width
-                    || point.y >= w.bounds.height
-                {
-                    return Err(fail("invalid_geometry", "Point is outside window bounds"));
-                }
-                let global = Point {
-                    x: w.bounds.x + point.x,
-                    y: w.bounds.y + point.y,
-                };
+                let global = w.bounds.local_to_global(point.clone())?;
                 if matches!(mode, ClickMode::Skylight) {
                     let t = SkyLightTarget {
                         pid: w.pid,

@@ -2,8 +2,9 @@
 
 Shared commands select their provider through `--provider` or `UNIMATION_PROVIDER`.
 The explicit flag takes precedence over the environment. The default `native` uses
-the host backend, currently macOS. It never selects a simulator merely because one
-is installed. The default build accepts `native`, `macos`, `apple-simulator`, `apple-device`, and `android`.
+the host backend: macOS on macOS and the AT-SPI/Wayland/X11 backend on Linux. It never
+selects a simulator merely because one is installed. The default build accepts `native`,
+`macos` or `linux` depending on the host, `apple-simulator`, `apple-device`, and `android`.
 
 ```sh
 unimation snapshot --format text
@@ -55,7 +56,10 @@ text, while `session --json` preserves the JSONL response protocol. Scripts that
 parse JSON must opt in. `spec`, `protocol`, and `completions` emit their documented
 artifact formats regardless of the data-output selection.
 
-The Apple simulator command and native macOS provider compile only on macOS.
+The Apple simulator command and native macOS provider compile only on macOS; the
+`linux` provider compiles only on Linux. On Linux, `capture --display N` selects an
+output by index and `--window HANDLE` a Hyprland window handle from `windows`; see
+[the Linux guide](linux.md).
 Physical Apple discovery has its own feature gate. Saved-snapshot tools are portable.
 
 ## Physical iOS devices

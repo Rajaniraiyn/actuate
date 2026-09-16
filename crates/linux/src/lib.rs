@@ -1,25 +1,14 @@
-//! Linux providers are independent: AT-SPI can run on X11 or Wayland;
-//! XTEST and X11 capture require an explicitly available X11 desktop.
+//! Linux providers: AT-SPI2 observation and semantic actions, Wayland and
+//! X11 input and capture routes, Hyprland window discovery, and the shared
+//! session. Native handles stay inside their provider; see docs/linux.md.
 #![cfg(target_os = "linux")]
 
-pub mod accessibility;
-pub mod provider;
+pub mod atspi;
+pub mod hyprland_windows;
+pub mod keymap;
 pub mod session;
-pub use provider::{AccessibilityProvider, DesktopProvider, Environment, Frame, SessionKind};
-pub mod wayland;
+pub mod wayland_capture;
+pub mod wayland_input;
 pub mod x11;
-pub use accessibility::Accessibility;
-pub use session::{LinuxRequest, LinuxSession};
-pub use x11::X11;
-
-use unimation::{Effect, NativeError};
-pub(crate) fn error(code: &str, message: impl ToString) -> NativeError {
-    NativeError {
-        code: code.into(),
-        message: message.to_string(),
-        effect: Effect::None,
-    }
-}
-pub(crate) fn unsupported(message: impl ToString) -> NativeError {
-    error("unsupported_route", message)
-}
+pub use atspi::AtSpi;
+pub use session::LinuxSession;

@@ -1,5 +1,3 @@
-#[cfg(target_os = "linux")]
-mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
@@ -10,8 +8,8 @@ fn main() {
     #[cfg(target_os = "windows")]
     windows::run();
     #[cfg(target_os = "linux")]
-    linux::run();
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    overlay::linux::run();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         eprintln!("Native cursor renderer is unavailable on this platform");
         std::process::exit(1);

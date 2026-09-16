@@ -1,8 +1,10 @@
 # Windows and Linux acceptance runs
 
-The first Windows/Linux implementations are built and checked from macOS. Compile
-checks cannot verify a desktop session, permissions, app event handling or pixels.
-Use the platform guides for the exact supported operations and known gaps.
+The Windows implementation is built and type-checked from other hosts; compile checks
+cannot verify a desktop session, permissions, app event handling or pixels. The Linux
+implementation was validated live on Hyprland; see [the Linux guide](linux.md) and
+[validation](validation.md#linux-2026-09-16). Use the platform guides for the exact
+supported operations and known gaps.
 
 ## Build and collect observations
 
@@ -106,6 +108,4 @@ and close it. The overlay must follow or hide without raising the target. Test
 mixed DPI separately. Poll-based ordering may lag native compositor transitions;
 record those failures instead of treating compilation as proof of attachment.
 
-See [Windows](windows-overlay.md) and [Linux](linux-overlay.md) for platform limits.
-Native Wayland overlay startup currently reports unsupported. Its separate
-[input portal guide](wayland.md) describes consent and persistent-session tests.
+See [Windows](windows-overlay.md) and [Linux](linux.md#visual-cursor) for platform limits.

@@ -5,12 +5,12 @@ use crate::{
 };
 use serde::Deserialize;
 use std::{
-    collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use unimation::{
-    presentation::{self, PresentationOptions},
+    presentation::PresentationOptions,
+    session::{Rendered, SnapshotHistory},
     *,
 };
 
@@ -96,25 +96,17 @@ fn frontmost() -> SimulatorScope {
     SimulatorScope::Frontmost
 }
 pub(crate) fn fail(code: &str, message: impl Into<String>) -> NativeError {
-    NativeError {
-        code: code.into(),
-        message: message.into(),
-        effect: Effect::None,
-    }
+    NativeError::new(code, message.into())
 }
 fn view(
     snapshot: Arc<Snapshot>,
     format: OutputFormat,
     options: &PresentationOptions,
 ) -> Result<Response> {
-    if format == OutputFormat::Json {
-        return Ok(Response::Snapshot(snapshot));
-    }
-    let projected = presentation::render_snapshot(&snapshot, options)?;
-    Ok(if format == OutputFormat::Text {
-        Response::Text(presentation::render_snapshot_text(&projected))
-    } else {
-        Response::Compact(projected)
+    Ok(match session::render(snapshot, format, options)? {
+        Rendered::Raw(snapshot) => Response::Snapshot(snapshot),
+        Rendered::Compact(view) => Response::Compact(view),
+        Rendered::Text(text) => Response::Text(text),
     })
 }
 /// A selected combination of capabilities, rather than an enum of OS backends.
@@ -140,26 +132,17 @@ impl<T> SessionBackend for T where
 }
 pub struct Session<B> {
     pub backend: B,
-    snapshots: VecDeque<Arc<Snapshot>>,
+    snapshots: SnapshotHistory,
 }
 impl<B: SessionBackend> Session<B> {
     pub fn new(backend: B) -> Self {
         Self {
             backend,
-            snapshots: VecDeque::new(),
+            snapshots: SnapshotHistory::default(),
         }
     }
     pub fn snapshot(&self, revision: Option<u64>) -> Result<&Arc<Snapshot>> {
-        match revision {
-            Some(r) => self.snapshots.iter().find(|s| s.revision == r),
-            None => self.snapshots.back(),
-        }
-        .ok_or_else(|| {
-            fail(
-                "unknown_snapshot",
-                "Session retains the latest 32 observations",
-            )
-        })
+        self.snapshots.get(revision)
     }
     pub fn execute(&mut self, request: Request) -> Result<Response> {
         match request {
@@ -175,30 +158,20 @@ impl<B: SessionBackend> Session<B> {
                 max_depth,
                 ..
             } => {
-                if max_nodes == 0 || max_nodes > 10000 || max_depth == 0 || max_depth > 100 {
-                    return Err(fail(
-                        "invalid_request",
-                        "max_nodes must be 1..10000 and max_depth 1..100",
-                    ));
-                }
-                let snapshot = Arc::new(self.backend.observe_scope(
+                session::validate_budget(max_nodes, max_depth)?;
+                let snapshot = self.snapshots.remember(self.backend.observe_scope(
                     scope,
                     ObservationBudget {
                         max_nodes,
                         max_depth,
                     },
                 )?);
-                let output = match request {
+                Ok(match request {
                     Request::Snapshot {
                         format, options, ..
-                    } => view(snapshot.clone(), format, &options)?,
-                    _ => Response::Snapshot(snapshot.clone()),
-                };
-                self.snapshots.push_back(snapshot);
-                if self.snapshots.len() > 32 {
-                    self.snapshots.pop_front();
-                }
-                Ok(output)
+                    } => view(snapshot, format, &options)?,
+                    _ => Response::Snapshot(snapshot),
+                })
             }
             Request::View {
                 revision,
@@ -217,7 +190,7 @@ impl<B: SessionBackend> Session<B> {
                 before,
                 after,
                 options,
-            } => Ok(Response::Text(presentation::render_view_diff(
+            } => Ok(Response::Text(unimation::presentation::render_view_diff(
                 self.snapshot(Some(before))?,
                 self.snapshot(after)?,
                 &options,

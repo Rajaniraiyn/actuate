@@ -16,6 +16,9 @@ serde.workspace = true
 ios.workspace = true
 android = { path = "../android", optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+linux.workspace = true
+
 [features]
 default = ["idevice", "android"]
 idevice = ["ios/physical"]
@@ -23,6 +26,3 @@ android = ["dep:android"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { path = "../windows" }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-linux = { path = "../linux" }

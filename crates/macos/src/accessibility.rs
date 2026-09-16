@@ -114,23 +114,13 @@ impl Accessibility {
             _thread_bound: PhantomData,
         }
     }
+    /// The reference namespace owned by this provider instance.
+    pub fn session_id(&self) -> &str {
+        &self.session
+    }
     /// Short display references are valid only inside this retained provider session.
     pub fn expand_reference(&self, short: &str) -> Result<ElementRef> {
-        let id = short
-            .strip_prefix("@e")
-            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-            .and_then(|s| s.parse::<u64>().ok())
-            .ok_or_else(|| {
-                error(
-                    "invalid_reference",
-                    "Expected a session-local @e<number> reference",
-                    Effect::None,
-                )
-            })?;
-        let reference = ElementRef {
-            session: self.session.clone(),
-            id,
-        };
+        let reference = ElementRef::parse_short(&self.session, short)?;
         self.resolve(&reference)?;
         Ok(reference)
     }

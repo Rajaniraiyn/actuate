@@ -1,8 +1,9 @@
 //! Raster and animation state use the same outline, easing and idle policy as
 //! other renderers. Positions are never forwarded to an input provider.
-use overlay::{CursorAppearance, CursorCommand, CursorScope, idle, motion, shape};
+use overlay::{CursorAppearance, CursorCommand, CursorScope, idle, shape};
 use std::time::{Duration, Instant};
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use unimation::motion;
 
 pub struct State {
     pub scope: CursorScope,

@@ -1,5 +1,5 @@
 //! Read-only filters over an existing observation. Returned nodes retain all data.
-use crate::{ElementRef, Node, Snapshot};
+use crate::{ElementRef, Node, Snapshot, schema::NativeSchema, values};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -23,7 +23,7 @@ impl TextMatch {
 pub struct NodeQuery {
     /// Native role, such as AXButton. No role aliases are inferred.
     pub role: Option<TextMatch>,
-    /// Matches native name/description and plain or attributed AX title/label text.
+    /// Matches plain or attributed AX title, description and label text without choosing a canonical name.
     pub name: Option<TextMatch>,
     /// Exact raw JSON equality, including native type tags. All predicates must match.
     #[serde(default)]
@@ -48,49 +48,31 @@ enum Match {
     No,
     Unknown,
 }
-fn string(value: Option<&Value>) -> Option<&str> {
-    let value = value?;
-    let value = if value.get("type").and_then(Value::as_str) == Some("attributed_string") {
-        value.get("text")?
-    } else {
-        value
-    };
-    if value.get("type").and_then(Value::as_str) == Some("string") {
-        value.get("value")?.as_str()
-    } else {
-        value.as_str()
-    }
-}
-fn is_unreadable(value: &Value) -> bool {
-    match value {
-        Value::Object(o) => {
-            matches!(
-                o.get("type").and_then(Value::as_str),
-                Some("opaque" | "read_error" | "ax_error" | "utf16")
-            ) || o.values().any(is_unreadable)
-        }
-        Value::Array(a) => a.iter().any(is_unreadable),
-        _ => false,
-    }
-}
 fn text(node: &Node, names: &[&str], predicate: &TextMatch) -> Match {
     let mut unknown = false;
     for name in names {
         match node.attributes.get(*name) {
-            Some(value) if string(Some(value)).is_some_and(|s| predicate.matches(s)) => {
+            Some(value) if values::string(value).is_some_and(|s| predicate.matches(s)) => {
                 return Match::Yes;
             }
-            Some(value) if string(Some(value)).is_some() => (),
-            Some(value) if is_unreadable(value) => unknown = true,
+            Some(value) if values::string(value).is_some() => (),
+            Some(value) if values::is_unreadable(value) => unknown = true,
             None if !node.issues.is_empty() => unknown = true,
             _ => (),
         }
     }
     if unknown { Match::Unknown } else { Match::No }
 }
-/// AND across filters; OR across the documented native name attributes.
+/// AND across filters; OR across the schema's native name attributes.
 /// Missing nodes in incomplete coverage are never implied to be non-matches.
 pub fn query_nodes(snapshot: &Snapshot, query: &NodeQuery) -> QueryResult {
+    query_nodes_with_schema(snapshot, query, NativeSchema::detect(snapshot))
+}
+pub fn query_nodes_with_schema(
+    snapshot: &Snapshot,
+    query: &NodeQuery,
+    schema: &NativeSchema,
+) -> QueryResult {
     let mut result = QueryResult {
         root: snapshot.root.clone(),
         revision: snapshot.revision,
@@ -103,33 +85,10 @@ pub fn query_nodes(snapshot: &Snapshot, query: &NodeQuery) -> QueryResult {
     for node in &snapshot.nodes {
         let mut predicates = vec![];
         if let Some(role) = &query.role {
-            predicates.push(text(
-                node,
-                if node.attributes.keys().any(|key| key.starts_with("AX")) {
-                    &["AXRole"]
-                } else {
-                    &["role"]
-                },
-                role,
-            ));
+            predicates.push(text(node, &[schema.role], role));
         }
         if let Some(name) = &query.name {
-            predicates.push(text(
-                node,
-                if node.attributes.keys().any(|key| key.starts_with("AX")) {
-                    &[
-                        "AXTitle",
-                        "AXDescription",
-                        "AXLabel",
-                        "AXAttributedTitle",
-                        "AXAttributedDescription",
-                        "AXAttributedLabel",
-                    ]
-                } else {
-                    &["name", "description"]
-                },
-                name,
-            ));
+            predicates.push(text(node, schema.names, name));
         }
         if let Some(action) = &query.action {
             predicates.push(if node.actions.contains(action) {
@@ -145,7 +104,7 @@ pub fn query_nodes(snapshot: &Snapshot, query: &NodeQuery) -> QueryResult {
             // unreadable value cannot establish a native-value mismatch.
             predicates.push(match node.attributes.get(key) {
                 Some(actual) if actual == expected => Match::Yes,
-                Some(actual) if is_unreadable(actual) => Match::Unknown,
+                Some(actual) if values::is_unreadable(actual) => Match::Unknown,
                 None if !node.issues.is_empty() => Match::Unknown,
                 _ => Match::No,
             });

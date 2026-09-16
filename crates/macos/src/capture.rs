@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::Write,
     os::unix::fs::DirBuilderExt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -174,16 +174,6 @@ pub fn current_revision(source: &CaptureSource) -> Result<String> {
     let (bounds, owner_pid) = source_state(source, &all)?;
     serde_json::to_string(&(source, bounds, owner_pid, all)).map_err(fail)
 }
-fn absolute_output(path: &Path) -> Result<PathBuf> {
-    if path.as_os_str().is_empty() {
-        return Err(fail("Capture output path is empty"));
-    }
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        Ok(std::env::current_dir().map_err(fail)?.join(path))
-    }
-}
 /// The helper can only write into a newly created private directory. The user's
 /// destination is opened with create_new after capture, then written through its handle.
 struct Staging(PathBuf);
@@ -214,7 +204,7 @@ impl Capture for ScreenshotCapture {
     type Request = CaptureRequest;
     type Frame = Frame;
     fn capture(&mut self, request: CaptureRequest) -> Result<Frame> {
-        let output_path = absolute_output(&request.path)?;
+        let output_path = unimation::image::absolute_output(&request.path)?;
         if !CGPreflightScreenCaptureAccess() {
             return Err(error(
                 "screen_recording_denied",
@@ -269,11 +259,7 @@ impl Capture for ScreenshotCapture {
             }
         }
         let bytes = std::fs::read(&staging_path).map_err(fail)?;
-        if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
-            return Err(fail("Capture did not produce a PNG"));
-        }
-        let pixel_width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-        let pixel_height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        let (pixel_width, pixel_height) = unimation::image::png_dimensions(&bytes)?;
         let mapping = FrameMapping {
             source_bounds: bounds,
             pixel_width,
@@ -304,15 +290,10 @@ mod tests {
     #[test]
     fn flaglike_output_is_absolute() {
         for name in ["-c", "-R-1,-2,100,100", "-42.png", "relative.png"] {
-            let path = absolute_output(Path::new(name)).unwrap();
+            let path = unimation::image::absolute_output(std::path::Path::new(name)).unwrap();
             assert!(path.is_absolute());
             assert_eq!(path.file_name().unwrap(), name);
         }
-        assert_eq!(
-            absolute_output(Path::new("/tmp/-x.png")).unwrap(),
-            PathBuf::from("/tmp/-x.png")
-        );
-        assert!(absolute_output(Path::new("")).is_err());
     }
     #[test]
     #[ignore = "requires a logged-in macOS desktop and Screen Recording permission"]

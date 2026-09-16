@@ -1,6 +1,6 @@
 //! Deterministic motion in caller-selected units. Plans do not dispatch input,
 //! sleep, infer screen coordinates, or animate idle cursor decoration.
-use crate::{Effect, NativeError, Result};
+use crate::{NativeError, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -97,6 +97,28 @@ impl MotionPlan {
             samples,
         })
     }
+    /// Straight-line drag with one sample per 10 ms, bounded to 100 samples.
+    pub fn for_drag(from: (f64, f64), to: (f64, f64), duration_ms: u64) -> Result<Self> {
+        Self::new(
+            from,
+            to,
+            Duration::from_millis(duration_ms),
+            (duration_ms / 10).clamp(1, 100) as usize,
+            MotionStyle::Straight,
+        )
+    }
+    /// Replays the plan in real time, sleeping until each sample is due.
+    pub fn walk(&self, mut emit: impl FnMut(&MotionSample) -> Result<()>) -> Result<()> {
+        let started = std::time::Instant::now();
+        for sample in &self.samples {
+            let wait = sample.at.saturating_sub(started.elapsed());
+            if !wait.is_zero() {
+                std::thread::sleep(wait);
+            }
+            emit(sample)?;
+        }
+        Ok(())
+    }
     pub fn samples(&self) -> &[MotionSample] {
         &self.samples
     }
@@ -191,11 +213,7 @@ fn validate(duration: Duration, steps: usize) -> Result<()> {
     Ok(())
 }
 fn invalid(message: &str) -> NativeError {
-    NativeError {
-        code: "motion_plan".into(),
-        message: message.into(),
-        effect: Effect::None,
-    }
+    NativeError::new("motion_plan", message)
 }
 
 #[cfg(test)]

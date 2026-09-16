@@ -1,547 +1,817 @@
-//! X11 renderer. Native Wayland overlays need a compositor-specific provider.
-use overlay::{CursorAppearance, CursorCommand, CursorScope, motion, shape};
+//! Linux cursor renderers: a Wayland layer-shell surface on Wayland sessions
+//! and an X11 Shape window (`x11`) on native X sessions.
+//!
+//! One small overlay-layer surface per output shows the shared cursor glyph
+//! with an empty input region, so it never receives or blocks pointer
+//! events and never takes keyboard focus. Window scope clips the glyph to a
+//! Hyprland window rectangle, follows that window, and hides when the window
+//! is unmapped or not on its monitor's active workspace. Occluding windows
+//! cannot cover an overlay-layer surface; that differs from macOS.
+pub mod x11;
+use crate::{
+    CursorAcknowledgement, CursorAppearance, CursorCommand, CursorScope,
+    shape::{HOTSPOT, OUTLINE, UNIT},
+};
+use compositor::{
+    Hyprland,
+    wayland::{Desktop, Outputs, ShmBuffer, fail},
+};
 use std::{
-    error::Error,
-    io::{self, BufRead},
-    sync::mpsc,
+    io::BufRead,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
+    },
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
-use x11rb::{
-    connection::Connection,
-    protocol::{
-        shape::{ConnectionExt as _, SK, SO},
-        xproto::*,
-    },
-    rust_connection::RustConnection,
+use unimation::{
+    NativeError, Result,
+    motion::{self, MotionStyle},
 };
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SIZE: u16 = 192;
-const TIP: f64 = 64.;
+use wayland_client::{
+    Connection, Dispatch, QueueHandle,
+    globals::GlobalListContents,
+    protocol::{wl_buffer, wl_compositor, wl_region, wl_registry, wl_shm, wl_shm_pool, wl_surface},
+};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
-pub fn run() {
-    if let Err(error) = run_x11() {
-        eprintln!("overlay: {error}");
-        std::process::exit(1);
-    }
-}
-fn run_x11() -> Result<()> {
-    // An XWayland window cannot represent the compositor's native window stack.
-    if std::env::var_os("WAYLAND_DISPLAY").is_some()
-        || std::env::var("XDG_SESSION_TYPE").is_ok_and(|s| s == "wayland")
-    {
-        return Err("wayland_overlay_unavailable: native compositor integration is required; XWayland is not a desktop overlay fallback".into());
-    }
-    let (connection, screen_number) = x11rb::connect(None)?;
-    let screen = &connection.setup().roots[screen_number];
-    let root = screen.root;
-    let version = connection.shape_query_version()?.reply()?;
-    if (version.major_version, version.minor_version) < (1, 1) {
-        return Err("X Shape 1.1 is required for click-through overlays".into());
-    }
-    let window = connection.generate_id()?;
-    connection
-        .create_window(
-            screen.root_depth,
-            window,
-            root,
-            0,
-            0,
-            SIZE,
-            SIZE,
-            0,
-            WindowClass::INPUT_OUTPUT,
-            screen.root_visual,
-            &CreateWindowAux::new()
-                .override_redirect(1)
-                .background_pixel(screen.black_pixel),
-        )?
-        .check()?;
-    connection
-        .shape_rectangles(
-            SO::SET,
-            SK::INPUT,
-            ClipOrdering::UNSORTED,
-            window,
-            0,
-            0,
-            &[],
-        )?
-        .check()?;
-    let gc = connection.generate_id()?;
-    connection
-        .create_gc(gc, window, &CreateGCAux::new())?
-        .check()?;
-    let atom =
-        |name: &[u8]| -> Result<Atom> { Ok(connection.intern_atom(false, name)?.reply()?.atom) };
-    let atoms = Atoms {
-        pid: atom(b"_NET_WM_PID")?,
-        desktop: atom(b"_NET_WM_DESKTOP")?,
-        current: atom(b"_NET_CURRENT_DESKTOP")?,
-    };
-    let (send, receive) = mpsc::sync_channel(128);
-    std::thread::spawn(move || {
-        for line in io::stdin().lock().lines() {
-            match line
-                .map_err(|e| e.to_string())
-                .and_then(|s| serde_json::from_str::<CursorCommand>(&s).map_err(|e| e.to_string()))
-            {
-                Ok(command) => {
-                    if send.send(command).is_err() {
-                        break;
-                    }
-                }
-                Err(error) => eprintln!("overlay command: {error}"),
-            }
-        }
-    });
-    let mut state = State::default();
-    let mut mapped = false;
-    let mut hidden_reason: Option<String> = None;
-    let mut allocated_color: Option<([f64; 3], u32)> = None;
-    loop {
-        // Follow the previous target before applying fresh absolute coordinates.
-        let old_scope = state.scope;
-        let mut resolved = resolve_scope(&connection, root, old_scope, &atoms);
-        if let Ok(Some(target)) = resolved.as_ref() {
-            state.follow(target);
-        }
-        for _ in 0..128 {
-            match receive.try_recv() {
-                Ok(command) => {
-                    if let Err(error) = command.validate() {
-                        eprintln!("overlay command: {error}");
-                        continue;
-                    }
-                    if !state.command(command) {
-                        connection.destroy_window(window)?.check()?;
-                        connection.flush()?;
-                        return Ok(());
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    connection.destroy_window(window)?.check()?;
-                    connection.flush()?;
-                    return Ok(());
-                }
-            }
-        }
-        for _ in 0..128 {
-            if connection.poll_for_event()?.is_none() {
-                break;
-            }
-        }
-        if state.scope != old_scope {
-            resolved = resolve_scope(&connection, root, state.scope, &atoms);
-            // A new scope establishes its origin without changing absolute commands.
-            if let Ok(Some(target)) = resolved.as_ref() {
-                state.origin = Some((target.x, target.y));
-            }
-        }
-        let attachment = match resolved {
-            Ok(target) => {
-                hidden_reason = None;
-                Some(target)
-            }
-            Err(error) => {
-                let reason = error.to_string();
-                if hidden_reason.as_ref() != Some(&reason) {
-                    eprintln!("overlay target hidden: {reason}");
-                    hidden_reason = Some(reason);
-                }
-                None
-            }
-        };
-        if state.visible && attachment.is_some() {
-            let (x, y) = state.position();
-            let idle = state.appearance.idle.offset(
-                state.activity.elapsed().as_secs_f64(),
-                state.appearance.motion,
-            );
-            let ox = (x - TIP).round();
-            let oy = (y - TIP).round();
-            if ox < i16::MIN as f64
-                || ox > i16::MAX as f64
-                || oy < i16::MIN as f64
-                || oy > i16::MAX as f64
-            {
-                if mapped {
-                    connection.unmap_window(window)?.check()?;
-                    mapped = false;
-                }
-            } else {
-                let target = attachment.flatten();
-                let mut configure = ConfigureWindowAux::new().x(ox as i32).y(oy as i32);
-                configure = if let Some(target) = target {
-                    configure.sibling(target.frame).stack_mode(StackMode::ABOVE)
-                } else {
-                    configure.stack_mode(StackMode::ABOVE)
-                };
-                connection.configure_window(window, &configure)?.check()?;
-                let region = glyph_region(&state, idle, ox, oy, target);
-                connection
-                    .shape_rectangles(
-                        SO::SET,
-                        SK::BOUNDING,
-                        ClipOrdering::UNSORTED,
-                        window,
-                        0,
-                        0,
-                        &region,
-                    )?
-                    .check()?;
-                if allocated_color.is_none_or(|(rgb, _)| rgb != state.appearance.color) {
-                    let [r, g, b] = state.appearance.color;
-                    let color = connection
-                        .alloc_color(
-                            screen.default_colormap,
-                            (r * 65535.) as u16,
-                            (g * 65535.) as u16,
-                            (b * 65535.) as u16,
-                        )?
-                        .reply()?;
-                    connection.change_gc(gc, &ChangeGCAux::new().foreground(color.pixel))?;
-                    if let Some((_, old)) =
-                        allocated_color.replace((state.appearance.color, color.pixel))
-                    {
-                        connection.free_colors(screen.default_colormap, 0, &[old])?;
-                    }
-                }
-                connection.poly_fill_rectangle(
-                    window,
-                    gc,
-                    &[Rectangle {
-                        x: 0,
-                        y: 0,
-                        width: SIZE,
-                        height: SIZE,
-                    }],
-                )?;
-                if !mapped {
-                    connection.map_window(window)?.check()?;
-                    mapped = true;
-                }
-            }
-        } else if mapped {
-            connection.unmap_window(window)?.check()?;
-            mapped = false;
-        }
-        connection.flush()?;
-        std::thread::sleep(Duration::from_millis(16));
-    }
-}
-struct Atoms {
-    pid: Atom,
-    desktop: Atom,
-    current: Atom,
-}
+/// Logical size of the square surface that holds the glyph and click ring.
+const BOX: i32 = 96;
+/// Where the hotspot sits inside the box.
+const TIP: (f64, f64) = (32., 32.);
+const TICK: Duration = Duration::from_millis(16);
+/// Poll interval while nothing moves; commands still arrive through the channel.
+const IDLE_TICK: Duration = Duration::from_millis(100);
+const WINDOW_POLL: Duration = Duration::from_millis(100);
+/// The glyph motion in progress.
 #[derive(Clone, Copy)]
-struct Attachment {
-    frame: Window,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+struct Motion {
+    from: (f64, f64),
+    to: (f64, f64),
+    since: Instant,
+    duration: Duration,
 }
-fn property(c: &RustConnection, window: Window, atom: Atom) -> Result<Option<u32>> {
-    Ok(
-        c.get_property(false, window, atom, AtomEnum::CARDINAL, 0, 1)?
-            .reply()?
-            .value32()
-            .and_then(|mut v| v.next()),
-    )
+/// What the last uploaded frame drew, so unchanged ticks skip rasterization.
+#[derive(Clone, PartialEq)]
+struct FrameKey {
+    fractional: (i32, i32),
+    idle: (i32, i32),
+    pulse: Option<i32>,
+    appearance: CursorAppearance,
+    clip: Option<(i64, i64, i64, i64)>,
 }
-fn resolve_scope(
-    c: &RustConnection,
-    root: Window,
+
+struct Layer {
+    output_origin: (i32, i32),
+    output_size: (i32, i32),
+    scale: i32,
+    surface: wl_surface::WlSurface,
+    layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    configured: bool,
+    buffer: Option<ShmBuffer>,
+    last_margin: Option<(i32, i32)>,
+    last_key: Option<FrameKey>,
+    mapped_visible: bool,
+}
+#[derive(Default)]
+struct State {
+    outputs: Outputs,
+    configured: Vec<(zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, u32)>,
+}
+impl AsMut<Outputs> for State {
+    fn as_mut(&mut self) -> &mut Outputs {
+        &mut self.outputs
+    }
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
+    fn event(
+        _: &mut Self,
+        _: &wl_registry::WlRegistry,
+        _: wl_registry::Event,
+        _: &GlobalListContents,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+compositor::delegate_outputs!(State);
+compositor::delegate_silent!(
+    State,
+    [
+        wl_compositor::WlCompositor,
+        wl_shm::WlShm,
+        wl_shm_pool::WlShmPool,
+        wl_buffer::WlBuffer,
+        wl_surface::WlSurface,
+        wl_region::WlRegion,
+        zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    ]
+);
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_layer_surface_v1::Event::Configure { serial, .. } => {
+                state.configured.push((layer.clone(), serial))
+            }
+            zwlr_layer_surface_v1::Event::Closed => {
+                state.configured.retain(|(l, _)| l != layer);
+            }
+            _ => {}
+        }
+    }
+}
+
+struct Target {
+    rect: Option<(f64, f64, f64, f64)>,
+    visible: bool,
+    checked: Instant,
+}
+
+struct Renderer {
+    desktop: Desktop<State>,
+    state: State,
+    compositor: wl_compositor::WlCompositor,
+    shm: wl_shm::WlShm,
+    layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    layers: Vec<Layer>,
+    hypr: Option<Hyprland>,
+    appearance: CursorAppearance,
     scope: CursorScope,
-    atoms: &Atoms,
-) -> Result<Option<Attachment>> {
-    match scope {
-        CursorScope::Desktop => Ok(None),
-        CursorScope::Window { window_id, pid } => u32::try_from(window_id)
-            .map_err(|e| Box::new(e) as Box<dyn Error>)
-            .and_then(|id| attachment(c, root, id, pid, atoms))
-            .map(Some),
-    }
+    target: Option<Target>,
+    position: (f64, f64),
+    motion: Option<Motion>,
+    pulse: Option<Instant>,
+    last_activity: Instant,
+    visible: bool,
 }
-fn attachment(
-    c: &RustConnection,
-    root: Window,
-    window: Window,
-    pid: i32,
-    atoms: &Atoms,
-) -> Result<Attachment> {
-    if property(c, window, atoms.pid)? != Some(pid as u32) {
-        return Err("target owner unavailable or changed".into());
+impl Renderer {
+    fn new() -> Result<Self> {
+        let mut desktop = Desktop::<State>::connect()?;
+        let qh = desktop.qh();
+        let mut state = State::default();
+        state.outputs.bind(&desktop.globals, &qh);
+        let compositor: wl_compositor::WlCompositor =
+            desktop.globals.bind(&qh, 4..=6, ()).map_err(fail)?;
+        let shm: wl_shm::WlShm = desktop.globals.bind(&qh, 1..=1, ()).map_err(fail)?;
+        let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 =
+            desktop.globals.bind(&qh, 1..=4, ()).map_err(|_| {
+                NativeError::new(
+                    "cursor_renderer_unavailable",
+                    "Compositor lacks zwlr_layer_shell_v1",
+                )
+            })?;
+        desktop.roundtrip(&mut state)?;
+        desktop.roundtrip(&mut state)?;
+        let mut renderer = Self {
+            desktop,
+            state,
+            compositor,
+            shm,
+            layer_shell,
+            layers: vec![],
+            hypr: Hyprland::from_env(),
+            appearance: CursorAppearance::default(),
+            scope: CursorScope::Desktop,
+            target: None,
+            position: (0., 0.),
+            motion: None,
+            pulse: None,
+            last_activity: Instant::now(),
+            visible: false,
+        };
+        renderer.create_layers()?;
+        Ok(renderer)
     }
-    if c.get_window_attributes(window)?.reply()?.map_state != MapState::VIEWABLE {
-        return Err("target not viewable".into());
-    }
-    let desktop = property(c, window, atoms.desktop)?.ok_or("target workspace unavailable")?;
-    let current = property(c, root, atoms.current)?.ok_or("current workspace unavailable")?;
-    if desktop != u32::MAX && desktop != current {
-        return Err("target on inactive workspace".into());
-    }
-    let geometry = c.get_geometry(window)?.reply()?;
-    let translated = c.translate_coordinates(window, root, 0, 0)?.reply()?;
-    if !translated.same_screen {
-        return Err("target is on another X screen".into());
-    }
-    let mut frame = window;
-    for _ in 0..64 {
-        let tree = c.query_tree(frame)?.reply()?;
-        if tree.parent == root {
-            return Ok(Attachment {
-                frame,
-                x: translated.dst_x as f64,
-                y: translated.dst_y as f64,
-                width: geometry.width as f64,
-                height: geometry.height as f64,
+    fn create_layers(&mut self) -> Result<()> {
+        let qh = self.desktop.qh();
+        let outputs: Vec<_> = self
+            .state
+            .outputs
+            .outputs
+            .iter()
+            .filter(|o| o.done && o.width > 0)
+            .map(|o| {
+                (
+                    (o.x, o.y),
+                    (o.width, o.height),
+                    o.scale.max(1),
+                    o.wl.clone(),
+                )
+            })
+            .collect();
+        for (origin, size, scale, wl) in outputs {
+            let surface = self.compositor.create_surface(&qh, ());
+            let region = self.compositor.create_region(&qh, ());
+            surface.set_input_region(Some(&region));
+            region.destroy();
+            surface.set_buffer_scale(scale);
+            let layer = self.layer_shell.get_layer_surface(
+                &surface,
+                Some(&wl),
+                zwlr_layer_shell_v1::Layer::Overlay,
+                "unimation-cursor".into(),
+                &qh,
+                (),
+            );
+            layer.set_anchor(
+                zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Left,
+            );
+            layer.set_size(BOX as u32, BOX as u32);
+            layer.set_exclusive_zone(-1);
+            layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+            layer.set_margin(-BOX, 0, 0, -BOX);
+            surface.commit();
+            self.layers.push(Layer {
+                output_origin: origin,
+                output_size: size,
+                scale,
+                surface,
+                layer,
+                configured: false,
+                buffer: None,
+                last_margin: None,
+                last_key: None,
+                mapped_visible: false,
             });
         }
-        if tree.parent == 0 {
-            break;
-        }
-        frame = tree.parent;
+        self.desktop.roundtrip(&mut self.state)?;
+        self.handle_configures();
+        Ok(())
     }
-    Err("target has no root sibling".into())
-}
-struct State {
-    point: (f64, f64),
-    start: (f64, f64),
-    end: (f64, f64),
-    movement: Instant,
-    duration: f64,
-    activity: Instant,
-    pulse: Option<Instant>,
-    visible: bool,
-    scope: CursorScope,
-    origin: Option<(f64, f64)>,
-    appearance: CursorAppearance,
-}
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            point: (0., 0.),
-            start: (0., 0.),
-            end: (0., 0.),
-            movement: Instant::now(),
-            duration: 0.,
-            activity: Instant::now(),
-            pulse: None,
-            visible: false,
-            scope: CursorScope::Desktop,
-            origin: None,
-            appearance: CursorAppearance::default(),
+    fn handle_configures(&mut self) {
+        let configured = std::mem::take(&mut self.state.configured);
+        for (layer, serial) in configured {
+            if let Some(entry) = self.layers.iter_mut().find(|l| l.layer == layer) {
+                layer.ack_configure(serial);
+                entry.configured = true;
+            }
         }
     }
-}
-impl State {
-    fn position(&mut self) -> (f64, f64) {
-        self.point = motion::sample(
-            self.start,
-            self.end,
-            if self.duration == 0. {
-                1.
-            } else {
-                self.movement.elapsed().as_secs_f64() / self.duration
+    fn refresh_target(&mut self) {
+        let CursorScope::Window { window_id, pid } = self.scope else {
+            self.target = None;
+            return;
+        };
+        let due = self
+            .target
+            .as_ref()
+            .is_none_or(|t| t.checked.elapsed() >= WINDOW_POLL);
+        if !due {
+            return;
+        }
+        let Some(hypr) = &self.hypr else {
+            self.target = Some(Target {
+                rect: None,
+                visible: false,
+                checked: Instant::now(),
+            });
+            return;
+        };
+        let client = hypr
+            .client_by_handle(window_id as u32, i64::from(pid))
+            .ok()
+            .flatten();
+        let monitors = hypr.monitors().unwrap_or_default();
+        let previous = self.target.as_ref().and_then(|t| t.rect);
+        let target = match &client {
+            Some(c) => Target {
+                rect: Some((
+                    c.at[0] as f64,
+                    c.at[1] as f64,
+                    c.size[0] as f64,
+                    c.size[1] as f64,
+                )),
+                visible: c.mapped
+                    && !c.hidden
+                    && compositor::hyprland::is_on_active_workspace(c, &monitors),
+                checked: Instant::now(),
             },
-            self.appearance.motion,
-        );
-        self.point
-    }
-    fn follow(&mut self, target: &Attachment) {
-        if let Some(old) = self.origin.replace((target.x, target.y)) {
-            self.rebase((target.x - old.0, target.y - old.1));
+            None => Target {
+                rect: None,
+                visible: false,
+                checked: Instant::now(),
+            },
+        };
+        if let (Some(old), Some(new)) = (previous, target.rect) {
+            let delta = (new.0 - old.0, new.1 - old.1);
+            if delta != (0., 0.) {
+                self.position.0 += delta.0;
+                self.position.1 += delta.1;
+                if let Some(motion) = &mut self.motion {
+                    motion.from.0 += delta.0;
+                    motion.from.1 += delta.1;
+                    motion.to.0 += delta.0;
+                    motion.to.1 += delta.1;
+                }
+            }
         }
+        self.target = Some(target);
     }
-    fn rebase(&mut self, d: (f64, f64)) {
-        self.start.0 += d.0;
-        self.start.1 += d.1;
-        self.end.0 += d.0;
-        self.end.1 += d.1;
-    }
-    fn command(&mut self, command: CursorCommand) -> bool {
+    fn apply(&mut self, command: CursorCommand) -> bool {
         match command {
             CursorCommand::Move { x, y, duration_ms } => {
-                self.start = self.position();
-                self.end = (x, y);
-                self.duration = duration_ms as f64 / 1000.;
-                self.movement = Instant::now();
-                self.activity = Instant::now();
-                self.visible = true;
+                self.last_activity = Instant::now();
+                if duration_ms == 0 || self.appearance.motion == MotionStyle::Reduced {
+                    self.position = (x, y);
+                    self.motion = None;
+                } else {
+                    self.motion = Some(Motion {
+                        from: self.position,
+                        to: (x, y),
+                        since: Instant::now(),
+                        duration: Duration::from_millis(duration_ms),
+                    });
+                }
             }
             CursorCommand::Click { x, y } => {
-                self.start = (x, y);
-                self.end = (x, y);
-                self.duration = 0.;
+                self.last_activity = Instant::now();
+                self.position = (x, y);
+                self.motion = None;
                 self.pulse = Some(Instant::now());
-                self.activity = Instant::now();
-                self.visible = true;
             }
             CursorCommand::Configure { appearance } => self.appearance = appearance,
             CursorCommand::Scope { scope } => {
                 self.scope = scope;
-                self.origin = None;
+                self.target = None;
             }
             CursorCommand::Hide => self.visible = false,
-            CursorCommand::Show => self.visible = true,
+            CursorCommand::Show => {
+                self.visible = true;
+                self.last_activity = Instant::now();
+            }
             CursorCommand::Quit => return false,
         }
         true
     }
-}
-fn glyph_region(
-    state: &State,
-    idle: (f64, f64),
-    ox: f64,
-    oy: f64,
-    target: Option<Attachment>,
-) -> Vec<Rectangle> {
-    let scale = shape::UNIT * state.appearance.scale;
-    let mut polygon = Vec::new();
-    for i in 0..shape::OUTLINE.len() {
-        let a = shape::OUTLINE[i];
-        let b = shape::OUTLINE[(i + 1) % shape::OUTLINE.len()];
-        for step in 0..12 {
-            let t = step as f64 / 12.;
-            let u = 1. - t;
-            let coord = |p: f64, q: f64, r: f64, s: f64| {
-                u * u * u * p + 3. * u * u * t * q + 3. * u * t * t * r + t * t * t * s
+    /// Advances animation clocks; returns the glyph offset and ring progress.
+    fn animate(&mut self) -> ((f64, f64), Option<f64>) {
+        if let Some(m) = self.motion {
+            let t = if m.duration.is_zero() {
+                1.
+            } else {
+                m.since.elapsed().as_secs_f64() / m.duration.as_secs_f64()
             };
-            polygon.push((
-                TIP + idle.0
-                    + (coord(
-                        a.point.0,
-                        a.point.0 + a.outgoing.0,
-                        b.point.0 + b.incoming.0,
-                        b.point.0,
-                    ) - shape::HOTSPOT.0)
-                        * scale,
-                TIP + idle.1
-                    + (coord(
-                        a.point.1,
-                        a.point.1 + a.outgoing.1,
-                        b.point.1 + b.incoming.1,
-                        b.point.1,
-                    ) - shape::HOTSPOT.1)
-                        * scale,
-            ));
-        }
-    }
-    let pulse = state
-        .pulse
-        .map(|p| p.elapsed().as_secs_f64() / 0.5)
-        .filter(|t| *t < 1.);
-    let mut region = Vec::new();
-    let radius = pulse
-        .map(|t| (5. + 17. * t) * state.appearance.scale + 2.)
-        .unwrap_or(0.);
-    let min_x = polygon
-        .iter()
-        .map(|p| p.0)
-        .fold(TIP - radius, f64::min)
-        .floor()
-        .max(0.) as u16;
-    let max_x = polygon
-        .iter()
-        .map(|p| p.0)
-        .fold(TIP + radius, f64::max)
-        .ceil()
-        .min(SIZE as f64) as u16;
-    let min_y = polygon
-        .iter()
-        .map(|p| p.1)
-        .fold(TIP - radius, f64::min)
-        .floor()
-        .max(0.) as u16;
-    let max_y = polygon
-        .iter()
-        .map(|p| p.1)
-        .fold(TIP + radius, f64::max)
-        .ceil()
-        .min(SIZE as f64) as u16;
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let px = x as f64 + 0.5;
-            let py = y as f64 + 0.5;
-            if target.is_some_and(|a| {
-                ox + px < a.x
-                    || oy + py < a.y
-                    || ox + px >= a.x + a.width
-                    || oy + py >= a.y + a.height
-            }) {
-                continue;
+            self.position = motion::sample(m.from, m.to, t, self.appearance.motion);
+            if t >= 1. {
+                self.motion = None;
+                self.last_activity = Instant::now();
             }
-            let mut inside = false;
-            for i in 0..polygon.len() {
-                let a = polygon[i];
-                let b = polygon[(i + 1) % polygon.len()];
-                if (a.1 > py) != (b.1 > py) && px < (b.0 - a.0) * (py - a.1) / (b.1 - a.1) + a.0 {
-                    inside = !inside;
+        }
+        let pulse = match self.pulse {
+            Some(since) => {
+                let t = since.elapsed().as_secs_f64() / 0.45;
+                if t >= 1. || self.appearance.motion == MotionStyle::Reduced {
+                    self.pulse = None;
+                    self.last_activity = Instant::now();
+                    None
+                } else {
+                    Some(t)
                 }
             }
-            let ring = pulse.is_some_and(|t| {
-                ((px - TIP).hypot(py - TIP) - (5. + 17. * t) * state.appearance.scale).abs() < 1.
+            None => None,
+        };
+        let idle = if self.visible && self.motion.is_none() && self.pulse.is_none() {
+            self.appearance.idle.offset(
+                self.last_activity.elapsed().as_secs_f64(),
+                self.appearance.motion,
+            )
+        } else {
+            (0., 0.)
+        };
+        (idle, pulse)
+    }
+    fn render(&mut self) -> Result<()> {
+        self.handle_configures();
+        self.refresh_target();
+        let (idle, pulse) = self.animate();
+        let scope_visible = match self.scope {
+            CursorScope::Desktop => true,
+            CursorScope::Window { .. } => self.target.as_ref().is_some_and(|t| t.visible),
+        };
+        let clip = match self.scope {
+            CursorScope::Desktop => None,
+            CursorScope::Window { .. } => self.target.as_ref().and_then(|t| t.rect),
+        };
+        let show = self.visible && scope_visible;
+        let position = self.position;
+        let appearance = self.appearance.clone();
+        let qh = self.desktop.qh();
+        let shm = self.shm.clone();
+        for layer in &mut self.layers {
+            if !layer.configured {
+                continue;
+            }
+            let on_output = show
+                && position.0 >= layer.output_origin.0 as f64
+                && position.1 >= layer.output_origin.1 as f64
+                && position.0 < (layer.output_origin.0 + layer.output_size.0) as f64
+                && position.1 < (layer.output_origin.1 + layer.output_size.1) as f64;
+            if !on_output {
+                if layer.mapped_visible {
+                    // Keep the surface mapped but fully transparent and parked off-screen.
+                    layer.layer.set_margin(-BOX, 0, 0, -BOX);
+                    let pixels = layer.scale * BOX;
+                    let buffer =
+                        ShmBuffer::new(&shm, &qh, pixels, pixels, wl_shm::Format::Argb8888)?;
+                    layer.surface.attach(Some(&buffer.buffer), 0, 0);
+                    layer.surface.damage_buffer(0, 0, pixels, pixels);
+                    layer.surface.commit();
+                    layer.buffer = Some(buffer);
+                    layer.last_margin = None;
+                    layer.last_key = None;
+                    layer.mapped_visible = false;
+                }
+                continue;
+            }
+            let local = (
+                position.0 - layer.output_origin.0 as f64,
+                position.1 - layer.output_origin.1 as f64,
+            );
+            let origin = (
+                (local.0 - TIP.0).floor() as i32,
+                (local.1 - TIP.1).floor() as i32,
+            );
+            let fractional = (
+                local.0 - TIP.0 - origin.0 as f64,
+                local.1 - TIP.1 - origin.1 as f64,
+            );
+            let pixels = layer.scale * BOX;
+            let clip_local = clip.map(|(x, y, w, h)| {
+                (
+                    x - layer.output_origin.0 as f64 - origin.0 as f64,
+                    y - layer.output_origin.1 as f64 - origin.1 as f64,
+                    w,
+                    h,
+                )
             });
-            if inside || ring {
-                region.push(Rectangle {
-                    x: x as i16,
-                    y: y as i16,
-                    width: 1,
-                    height: 1,
-                });
+            // Quantize to a quarter point so idle float does not redraw every tick.
+            let quarter = |v: f64| (v * 4.).round() as i32;
+            let key = FrameKey {
+                fractional: (quarter(fractional.0), quarter(fractional.1)),
+                idle: (quarter(idle.0), quarter(idle.1)),
+                pulse: pulse.map(|t| (t * 60.) as i32),
+                appearance: appearance.clone(),
+                clip: clip_local.map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64)),
+            };
+            let margin_changed = layer.last_margin != Some(origin);
+            let frame_changed = layer.last_key.as_ref() != Some(&key);
+            if !margin_changed && !frame_changed && layer.mapped_visible {
+                continue;
+            }
+            if margin_changed {
+                layer.layer.set_margin(origin.1, 0, 0, origin.0);
+                layer.last_margin = Some(origin);
+            }
+            if frame_changed || layer.buffer.is_none() {
+                let frame = draw(
+                    pixels as u32,
+                    layer.scale as f64,
+                    &appearance,
+                    (TIP.0 + fractional.0 + idle.0, TIP.1 + fractional.1 + idle.1),
+                    pulse,
+                    clip_local,
+                );
+                let mut buffer =
+                    ShmBuffer::new(&shm, &qh, pixels, pixels, wl_shm::Format::Argb8888)?;
+                buffer.map[..frame.len()].copy_from_slice(&frame);
+                layer.surface.attach(Some(&buffer.buffer), 0, 0);
+                layer.surface.damage_buffer(0, 0, pixels, pixels);
+                layer.buffer = Some(buffer);
+                layer.last_key = Some(key);
+            }
+            layer.surface.commit();
+            layer.mapped_visible = true;
+        }
+        self.desktop.connection.flush().map_err(fail)?;
+        Ok(())
+    }
+    /// Whether the next tick can change pixels without a new command.
+    fn animating(&self) -> bool {
+        self.motion.is_some()
+            || self.pulse.is_some()
+            || (self.visible
+                && self.appearance.motion != MotionStyle::Reduced
+                && self.appearance.idle.style != crate::idle::IdleStyle::Off)
+            || matches!(self.scope, CursorScope::Window { .. })
+    }
+    fn pump(&mut self, wait: Duration) -> Result<()> {
+        self.desktop
+            .queue
+            .dispatch_pending(&mut self.state)
+            .map_err(fail)?;
+        self.desktop.connection.flush().map_err(fail)?;
+        if let Some(guard) = self.desktop.queue.prepare_read() {
+            let fd = guard.connection_fd();
+            let mut fds = [rustix::event::PollFd::new(
+                &fd,
+                rustix::event::PollFlags::IN,
+            )];
+            let timeout = rustix::time::Timespec {
+                tv_sec: wait.as_secs() as _,
+                tv_nsec: wait.subsec_nanos() as _,
+            };
+            let ready = rustix::event::poll(&mut fds, Some(&timeout)).unwrap_or(0);
+            if ready > 0 {
+                let _ = guard.read();
+            } else {
+                drop(guard);
+            }
+        }
+        self.desktop
+            .queue
+            .dispatch_pending(&mut self.state)
+            .map_err(fail)?;
+        Ok(())
+    }
+}
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        for layer in &self.layers {
+            layer.layer.destroy();
+            layer.surface.destroy();
+        }
+        let _ = self.desktop.connection.flush();
+    }
+}
+
+/// Rasterizes the glyph and ring into premultiplied ARGB8888 bytes.
+fn draw(
+    size: u32,
+    scale: f64,
+    appearance: &CursorAppearance,
+    tip: (f64, f64),
+    pulse: Option<f64>,
+    clip: Option<(f64, f64, f64, f64)>,
+) -> Vec<u8> {
+    use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
+    let mut pixmap = Pixmap::new(size, size).expect("nonzero size");
+    let glyph = appearance.scale;
+    let point = |x: f64, y: f64| -> (f32, f32) {
+        (
+            ((tip.0 + (x - HOTSPOT.0) * UNIT * glyph) * scale) as f32,
+            ((tip.1 + (y - HOTSPOT.1) * UNIT * glyph) * scale) as f32,
+        )
+    };
+    let mut builder = PathBuilder::new();
+    let (sx, sy) = point(OUTLINE[0].point.0, OUTLINE[0].point.1);
+    builder.move_to(sx, sy);
+    for index in 0..OUTLINE.len() {
+        let from = OUTLINE[index];
+        let to = OUTLINE[(index + 1) % OUTLINE.len()];
+        let (c1x, c1y) = point(
+            from.point.0 + from.outgoing.0,
+            from.point.1 + from.outgoing.1,
+        );
+        let (c2x, c2y) = point(to.point.0 + to.incoming.0, to.point.1 + to.incoming.1);
+        let (x, y) = point(to.point.0, to.point.1);
+        builder.cubic_to(c1x, c1y, c2x, c2y, x, y);
+    }
+    builder.close();
+    let [r, g, b] = appearance.color;
+    if let Some(path) = builder.finish() {
+        // Soft shadow: layered offset fills stand in for a blur.
+        for (offset, alpha) in [(3.5, 0.10), (2.5, 0.14), (1.5, 0.18)] {
+            let mut paint = Paint::default();
+            paint.set_color(Color::from_rgba(0., 0., 0., alpha).unwrap());
+            paint.anti_alias = true;
+            let stroke = Stroke {
+                width: (offset * glyph * scale) as f32,
+                ..Default::default()
+            };
+            let shifted = Transform::from_translate(0., (2. * glyph * scale) as f32);
+            pixmap.fill_path(&path, &paint, FillRule::Winding, shifted, None);
+            pixmap.stroke_path(&path, &paint, &stroke, shifted, None);
+        }
+        let mut fill = Paint::default();
+        fill.set_color(Color::from_rgba(r as f32, g as f32, b as f32, 1.).unwrap());
+        fill.anti_alias = true;
+        pixmap.fill_path(&path, &fill, FillRule::Winding, Transform::identity(), None);
+        let mut outline = Paint::default();
+        outline.set_color(Color::WHITE);
+        outline.anti_alias = true;
+        let stroke = Stroke {
+            width: (1.5 * glyph * scale) as f32,
+            ..Default::default()
+        };
+        pixmap.stroke_path(&path, &outline, &stroke, Transform::identity(), None);
+    }
+    if let Some(t) = pulse {
+        let radius = ((5. + 17. * t) * glyph * scale) as f32;
+        if let Some(ring) =
+            PathBuilder::from_circle((tip.0 * scale) as f32, (tip.1 * scale) as f32, radius)
+        {
+            let mut paint = Paint::default();
+            paint.set_color(
+                Color::from_rgba(r as f32, g as f32, b as f32, ((1. - t) * 0.65) as f32).unwrap(),
+            );
+            paint.anti_alias = true;
+            let stroke = Stroke {
+                width: (2. * glyph * scale * (1. - t * 0.5)) as f32,
+                ..Default::default()
+            };
+            pixmap.stroke_path(&ring, &paint, &stroke, Transform::identity(), None);
+        }
+    }
+    let mut bytes = pixmap.take();
+    if let Some((cx, cy, cw, ch)) = clip {
+        let (x0, y0, x1, y1) = (cx * scale, cy * scale, (cx + cw) * scale, (cy + ch) * scale);
+        for y in 0..size {
+            for x in 0..size {
+                let inside =
+                    (x as f64) >= x0 && (x as f64) < x1 && (y as f64) >= y0 && (y as f64) < y1;
+                if !inside {
+                    let o = ((y * size + x) * 4) as usize;
+                    bytes[o..o + 4].fill(0);
+                }
             }
         }
     }
-    region
+    // tiny-skia is premultiplied RGBA; wl_shm ARGB8888 is BGRA in memory.
+    for px in bytes.as_chunks_mut::<4>().0 {
+        px.swap(0, 2);
+    }
+    bytes
+}
+
+fn run_loop(
+    receiver: Receiver<CursorCommand>,
+    running: Arc<AtomicBool>,
+    ready: SyncSender<Result<()>>,
+) {
+    let mut renderer = match Renderer::new() {
+        Ok(r) => {
+            let _ = ready.send(Ok(()));
+            r
+        }
+        Err(e) => {
+            let _ = ready.send(Err(e));
+            running.store(false, Ordering::Release);
+            return;
+        }
+    };
+    let mut last_error: Option<NativeError> = None;
+    'outer: while running.load(Ordering::Acquire) {
+        for _ in 0..256 {
+            match receiver.try_recv() {
+                Ok(command) => {
+                    if !renderer.apply(command) {
+                        break 'outer;
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => break 'outer,
+            }
+        }
+        if let Err(e) = renderer.render() {
+            if last_error
+                .as_ref()
+                .map(|l| l.message != e.message)
+                .unwrap_or(true)
+            {
+                eprintln!("unimation-overlay: {e}");
+            }
+            last_error = Some(e);
+        }
+        let wait = if renderer.animating() {
+            TICK
+        } else {
+            IDLE_TICK
+        };
+        if renderer.pump(wait).is_err() {
+            break;
+        }
+    }
+    running.store(false, Ordering::Release);
+}
+
+/// In-process renderer on its own thread and Wayland connection.
+pub struct LayerCursor {
+    sender: Option<SyncSender<CursorCommand>>,
+    thread: Option<JoinHandle<()>>,
+    running: Arc<AtomicBool>,
+}
+impl LayerCursor {
+    pub fn start() -> Result<Self> {
+        let (sender, receiver) = mpsc::sync_channel(256);
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = running.clone();
+        let thread = std::thread::Builder::new()
+            .name("unimation-cursor".into())
+            .spawn(move || run_loop(receiver, flag, ready_tx))
+            .map_err(|e| NativeError::new("cursor_renderer_unavailable", e))?;
+        match ready_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => Ok(Self {
+                sender: Some(sender),
+                thread: Some(thread),
+                running,
+            }),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(NativeError::new(
+                "cursor_renderer_unavailable",
+                "Renderer thread did not start",
+            )),
+        }
+    }
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+    pub fn visualize(&mut self, command: CursorCommand) -> Result<CursorAcknowledgement> {
+        command.validate()?;
+        let sender = self
+            .sender
+            .as_ref()
+            .filter(|_| self.running.load(Ordering::Acquire))
+            .ok_or_else(|| NativeError::new("overlay_failed", "Renderer stopped"))?;
+        sender.try_send(command).map_err(|e| match e {
+            TrySendError::Full(_) => NativeError::new("overlay_failed", "Overlay queue is full"),
+            TrySendError::Disconnected(_) => {
+                NativeError::new("overlay_failed", "Renderer disconnected")
+            }
+        })?;
+        Ok(CursorAcknowledgement::Queued)
+    }
+    pub fn stop(&mut self) -> Result<()> {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.try_send(CursorCommand::Quit);
+        }
+        self.running.store(false, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        Ok(())
+    }
+}
+impl Drop for LayerCursor {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+impl unimation::CursorVisualization for LayerCursor {
+    type Command = CursorCommand;
+    type Status = CursorAcknowledgement;
+    fn visualize(&mut self, command: CursorCommand) -> Result<CursorAcknowledgement> {
+        LayerCursor::visualize(self, command)
+    }
+}
+
+/// Standalone helper: one JSON command per stdin line until EOF or quit.
+/// X sessions without a Wayland display use the X11 Shape renderer.
+pub fn run() {
+    if !x11::is_wayland_session() {
+        x11::run();
+        return;
+    }
+    let mut cursor = match LayerCursor::start() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("unimation-overlay: {e}");
+            std::process::exit(1);
+        }
+    };
+    for line in std::io::stdin().lock().lines() {
+        let Ok(line) = line else { break };
+        match serde_json::from_str::<CursorCommand>(&line) {
+            Ok(CursorCommand::Quit) => break,
+            Ok(command) => {
+                if let Err(e) = cursor.visualize(command) {
+                    eprintln!("unimation-overlay: {e}");
+                }
+            }
+            Err(e) => eprintln!("unimation-overlay: invalid command: {e}"),
+        }
+        if !cursor.is_running() {
+            break;
+        }
+    }
+    let _ = cursor.stop();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn scoped_glyph_never_paints_outside_target_client() {
-        let state = State::default();
-        let target = Attachment {
-            frame: 10,
-            x: 65.,
-            y: 65.,
-            width: 5.,
-            height: 5.,
-        };
-        let region = glyph_region(&state, (0., 0.), 0., 0., Some(target));
-        assert!(!region.is_empty());
-        assert!(region.iter().all(|r| r.x >= 65
-            && r.y >= 65
-            && r.x + r.width as i16 <= 70
-            && r.y + r.height as i16 <= 70));
-        assert!(glyph_region(&state, (0., 0.), 1000., 1000., Some(target)).is_empty());
-    }
-    #[test]
-    fn target_motion_precedes_fresh_absolute_commands() {
-        let mut state = State {
-            origin: Some((50., 50.)),
-            ..Default::default()
-        };
-        let target = Attachment {
-            frame: 10,
-            x: 60.,
-            y: 40.,
-            width: 100.,
-            height: 100.,
-        };
-        state.follow(&target);
-        state.command(CursorCommand::Move {
-            x: 100.,
-            y: 200.,
-            duration_ms: 0,
-        });
-        assert_eq!(state.position(), (100., 200.));
-        state.follow(&target);
-        assert_eq!(state.position(), (100., 200.));
-        state.follow(&Attachment { x: 70., ..target });
-        assert_eq!(state.position(), (110., 200.));
+    fn glyph_is_drawn_inside_the_box_and_clip_clears_outside() {
+        let frame = draw(96, 1., &CursorAppearance::default(), TIP, Some(0.3), None);
+        assert_eq!(frame.len(), 96 * 96 * 4);
+        assert!(frame.chunks(4).any(|p| p[3] > 0));
+        let clipped = draw(
+            96,
+            1.,
+            &CursorAppearance::default(),
+            TIP,
+            None,
+            Some((0., 0., 1., 1.)),
+        );
+        assert!(clipped.chunks(4).skip(97).all(|p| p[3] == 0));
     }
 }

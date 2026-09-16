@@ -1,429 +1,607 @@
-//! X11 root coordinates are server pixels. They are not Wayland logical coordinates.
-use crate::{Environment, Frame, SessionKind, error, unsupported};
-use serde::Serialize;
+//! X11 routes through XTest, window enumeration and drawable capture.
+//!
+//! Under Xwayland started without EI portal support, XTest events stay
+//! inside the X server: X11 clients receive them while the compositor's
+//! shared cursor never moves. On a native X server the same calls are
+//! global input. The receipt route names which server answered.
+//!
+//! All public coordinates are logical layout points. Hyprland runs Xwayland
+//! in a space scaled by each monitor's scale factor; `XSpace` converts at
+//! this boundary so callers never see X pixels.
+use crate::{keymap::CONTROL_KEYSYMS, wayland_capture::write_png};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{
-    fs::File,
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Duration};
 use unimation::{
-    Capture, Delivery, Discover, Effect, KeyChord, KeyboardInput, Modifiers, MouseButton, Point,
-    PointerAction, PointerInput, Receipt, Result,
+    Delivery, KeyChord, KeyboardInput, Modifiers, MouseButton, NativeError, Point, PointerAction,
+    PointerInput, Receipt, Result, TextInput,
     geometry::{FrameMapping, Rect},
-    motion::{MotionPlan, MotionStyle},
+    motion::MotionPlan,
 };
 use x11rb::{
-    CURRENT_TIME,
     connection::Connection,
-    protocol::{randr::ConnectionExt as _, xproto::*, xtest::ConnectionExt as _},
+    protocol::{
+        xproto::{self, AtomEnum, ConnectionExt, ImageFormat, Window},
+        xtest::ConnectionExt as _,
+    },
     rust_connection::RustConnection,
 };
 
-pub struct X11 {
-    connection: RustConnection,
-    screen: usize,
+const KEY_PRESS: u8 = 2;
+const KEY_RELEASE: u8 = 3;
+const BUTTON_PRESS: u8 = 4;
+const BUTTON_RELEASE: u8 = 5;
+const MOTION_NOTIFY: u8 = 6;
+const XK_SHIFT_L: u32 = 0xffe1;
+const XK_CONTROL_L: u32 = 0xffe3;
+const XK_ALT_L: u32 = 0xffe9;
+const XK_SUPER_L: u32 = 0xffeb;
+
+/// Per-monitor scale between logical layout points and X pixels.
+#[derive(Debug, Clone, Default)]
+pub struct XSpace {
+    monitors: Vec<(Rect, f64)>,
 }
-#[derive(Debug, Serialize)]
-pub struct WindowInfo {
-    pub id: u32,
+impl XSpace {
+    /// Identity space: X pixels are logical points (native X sessions).
+    pub fn identity() -> Self {
+        Self::default()
+    }
+    pub fn from_monitors(monitors: Vec<(Rect, f64)>) -> Self {
+        Self {
+            monitors: monitors.into_iter().filter(|(_, s)| *s > 0.).collect(),
+        }
+    }
+    fn scale_at(&self, point: &Point) -> f64 {
+        self.monitors
+            .iter()
+            .find(|(rect, _)| rect.contains(point))
+            .map(|(_, scale)| *scale)
+            .unwrap_or(1.)
+    }
+    pub fn to_x(&self, point: Point) -> Point {
+        let scale = self.scale_at(&point);
+        Point {
+            x: point.x * scale,
+            y: point.y * scale,
+        }
+    }
+    /// Logical rectangle for an X rectangle, using the scale at its origin.
+    pub fn to_logical(&self, rect: Rect) -> Rect {
+        let scale = self
+            .monitors
+            .iter()
+            .find(|(m, s)| {
+                m.contains(&Point {
+                    x: rect.x / s,
+                    y: rect.y / s,
+                })
+            })
+            .map(|(_, s)| *s)
+            .unwrap_or(1.);
+        Rect {
+            x: rect.x / scale,
+            y: rect.y / scale,
+            width: rect.width / scale,
+            height: rect.height / scale,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct X11Window {
+    pub window_id: u32,
     pub pid: Option<u32>,
-    pub title: String,
+    pub class: Option<String>,
+    pub instance: Option<String>,
+    pub title: Option<String>,
+    /// Logical layout geometry.
     pub bounds: Rect,
+    /// Root-relative geometry in X pixels.
+    pub x_bounds: Rect,
     pub mapped: bool,
-    pub desktop: Option<u32>,
+}
+
+fn fail(message: impl ToString) -> NativeError {
+    NativeError::new("x11", message)
+}
+
+struct KeyboardMapping {
+    min: u8,
+    per: u8,
+    keysyms: Vec<u32>,
+}
+
+pub struct X11 {
+    conn: RustConnection,
+    screen: usize,
+    root: Window,
+    atoms: Atoms,
+    xwayland: bool,
+    space: XSpace,
+    mapping: KeyboardMapping,
+    remapped: Option<(u8, Vec<u32>)>,
+}
+struct Atoms {
+    client_list: u32,
+    wm_pid: u32,
+    wm_name: u32,
+    utf8_string: u32,
 }
 impl X11 {
-    /// Automatic routing never mistakes XWayland for the whole Wayland desktop.
-    /// An embedder may explicitly connect to a particular X server with `connect`.
-    pub fn auto() -> Result<Self> {
-        if Environment::detect().kind == SessionKind::Wayland {
-            return Err(unsupported(
-                "Wayland capture/input needs a portal or compositor provider; automatic XWayland fallback is disabled",
-            ));
-        }
-        Self::connect(None)
-    }
-    pub fn connect(display: Option<&str>) -> Result<Self> {
-        let (connection, screen) = x11rb::connect(display).map_err(|e| error("x11_connect", e))?;
-        Ok(Self { connection, screen })
-    }
-    fn root(&self) -> u32 {
-        self.connection.setup().roots[self.screen].root
-    }
-    fn atom(&self, name: &str) -> Result<u32> {
-        Ok(self
-            .connection
-            .intern_atom(false, name.as_bytes())
-            .map_err(read_error)?
+    pub fn connect(space: XSpace) -> Result<Self> {
+        let (conn, screen) =
+            RustConnection::connect(None).map_err(|e| NativeError::new("x11_unavailable", e))?;
+        let setup = conn.setup();
+        let root = setup.roots[screen].root;
+        let (min, max) = (setup.min_keycode, setup.max_keycode);
+        let vendor = String::from_utf8_lossy(&setup.vendor).to_string();
+        let names = [
+            "_NET_CLIENT_LIST",
+            "_NET_WM_PID",
+            "_NET_WM_NAME",
+            "UTF8_STRING",
+        ];
+        let cookies: Vec<_> = names
+            .iter()
+            .map(|name| conn.intern_atom(false, name.as_bytes()))
+            .collect::<std::result::Result<_, _>>()
+            .map_err(fail)?;
+        let version = conn.xtest_get_version(2, 2).map_err(fail)?;
+        let extensions = conn.list_extensions().map_err(fail)?;
+        let mapping = conn
+            .get_keyboard_mapping(min, max - min + 1)
+            .map_err(fail)?;
+        let atoms: Vec<u32> = cookies
+            .into_iter()
+            .map(|c| c.reply().map(|r| r.atom).map_err(fail))
+            .collect::<Result<_>>()?;
+        let atoms = Atoms {
+            client_list: atoms[0],
+            wm_pid: atoms[1],
+            wm_name: atoms[2],
+            utf8_string: atoms[3],
+        };
+        version
             .reply()
-            .map_err(read_error)?
-            .atom)
-    }
-    fn property(&self, window: u32, name: &str) -> Result<GetPropertyReply> {
-        self.connection
-            .get_property(false, window, self.atom(name)?, AtomEnum::ANY, 0, 1_048_576)
-            .map_err(read_error)?
+            .map_err(|_| NativeError::unsupported("X server lacks the XTEST extension"))?;
+        let xwayland = extensions
             .reply()
-            .map_err(read_error)
-    }
-    fn cardinal(&self, window: u32, name: &str) -> Option<u32> {
-        self.property(window, name).ok()?.value32()?.next()
-    }
-    fn bounds(&self, window: u32) -> Result<Rect> {
-        let g = self
-            .connection
-            .get_geometry(window)
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        let p = self
-            .connection
-            .translate_coordinates(window, self.root(), 0, 0)
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        Ok(Rect {
-            x: p.dst_x.into(),
-            y: p.dst_y.into(),
-            width: g.width.into(),
-            height: g.height.into(),
+            .map_err(fail)?
+            .names
+            .iter()
+            .any(|n| n.name == b"XWAYLAND")
+            || vendor.contains("Xwayland");
+        let mapping = mapping.reply().map_err(fail)?;
+        Ok(Self {
+            conn,
+            screen,
+            root,
+            atoms,
+            xwayland,
+            space,
+            mapping: KeyboardMapping {
+                min,
+                per: mapping.keysyms_per_keycode,
+                keysyms: mapping.keysyms,
+            },
+            remapped: None,
         })
     }
-    pub fn windows(&self) -> Result<Value> {
-        let ids = self.property(self.root(), "_NET_CLIENT_LIST_STACKING")?;
-        let (ids, source): (Vec<u32>, _) = if let Some(v) = ids.value32() {
-            (v.collect(), "ewmh_stacking_bottom_to_top")
-        } else {
-            (
-                self.connection
-                    .query_tree(self.root())
-                    .map_err(read_error)?
-                    .reply()
-                    .map_err(read_error)?
-                    .children,
-                "root_children",
-            )
+    pub fn capabilities(&self) -> Value {
+        let screen = &self.conn.setup().roots[self.screen];
+        json!({
+            "xwayland": self.xwayland,
+            "xtest": true,
+            "delivery": if self.xwayland { "x_server_local" } else { "global" },
+            "moves_shared_cursor": !self.xwayland,
+            "screen": {"width": screen.width_in_pixels, "height": screen.height_in_pixels},
+            "scaled_monitors": self.space.monitors.len(),
+        })
+    }
+    fn property_string(&self, window: Window, property: u32, kind: u32) -> Option<String> {
+        let reply = self
+            .conn
+            .get_property(false, window, property, kind, 0, 4096)
+            .ok()?
+            .reply()
+            .ok()?;
+        if reply.value.is_empty() {
+            return None;
+        }
+        Some(
+            String::from_utf8_lossy(&reply.value)
+                .trim_end_matches('\0')
+                .to_owned(),
+        )
+    }
+    fn window_record(&self, window: Window) -> Result<X11Window> {
+        let geometry = self.conn.get_geometry(window).map_err(fail)?;
+        let translated = self
+            .conn
+            .translate_coordinates(window, self.root, 0, 0)
+            .map_err(fail)?;
+        let attributes = self.conn.get_window_attributes(window).map_err(fail)?;
+        let pid = self
+            .conn
+            .get_property(false, window, self.atoms.wm_pid, AtomEnum::CARDINAL, 0, 1)
+            .map_err(fail)?;
+        let geometry = geometry.reply().map_err(fail)?;
+        let translated = translated.reply().map_err(fail)?;
+        let attributes = attributes.reply().map_err(fail)?;
+        let pid = pid
+            .reply()
+            .ok()
+            .and_then(|r| r.value32().and_then(|mut v| v.next()));
+        let class =
+            self.property_string(window, AtomEnum::WM_CLASS.into(), AtomEnum::STRING.into());
+        let (instance, class) = match class {
+            Some(raw) => {
+                let mut parts = raw.split('\0');
+                (
+                    parts.next().map(str::to_owned),
+                    parts.next().map(str::to_owned),
+                )
+            }
+            None => (None, None),
         };
-        let mut windows = Vec::new();
-        let mut issues = Vec::new();
-        for id in ids {
-            let item = (|| -> Result<WindowInfo> {
-                let attrs = self
-                    .connection
-                    .get_window_attributes(id)
-                    .map_err(read_error)?
-                    .reply()
-                    .map_err(read_error)?;
-                let title = self
-                    .property(id, "_NET_WM_NAME")
-                    .ok()
-                    .filter(|v| !v.value.is_empty())
-                    .or_else(|| self.property(id, "WM_NAME").ok())
-                    .map(|v| String::from_utf8_lossy(&v.value).into_owned())
-                    .unwrap_or_default();
-                Ok(WindowInfo {
-                    id,
-                    pid: self.cardinal(id, "_NET_WM_PID"),
-                    title,
-                    bounds: self.bounds(id)?,
-                    mapped: attrs.map_state == MapState::VIEWABLE,
-                    desktop: self.cardinal(id, "_NET_WM_DESKTOP"),
-                })
-            })();
-            match item {
-                Ok(w) => windows.push(w),
-                Err(e) => issues.push(json!({"window":id,"error":e})),
-            }
-        }
-        Ok(
-            json!({"windows":windows,"issues":issues,"source":source,"reported_active_pid":self.cardinal(self.root(),"_NET_ACTIVE_WINDOW").and_then(|w|self.cardinal(w,"_NET_WM_PID")),"current_desktop":self.cardinal(self.root(), "_NET_CURRENT_DESKTOP"),"coordinate_space":"x11_root_pixels"}),
-        )
+        let title = self
+            .property_string(window, self.atoms.wm_name, self.atoms.utf8_string)
+            .or_else(|| {
+                self.property_string(window, AtomEnum::WM_NAME.into(), AtomEnum::STRING.into())
+            });
+        let x_bounds = Rect {
+            x: f64::from(translated.dst_x),
+            y: f64::from(translated.dst_y),
+            width: f64::from(geometry.width),
+            height: f64::from(geometry.height),
+        };
+        Ok(X11Window {
+            window_id: window,
+            pid,
+            class,
+            instance,
+            title,
+            bounds: self.space.to_logical(x_bounds),
+            x_bounds,
+            mapped: attributes.map_state == xproto::MapState::VIEWABLE,
+        })
     }
-    pub fn displays(&self) -> Result<Value> {
-        let monitors = self
-            .connection
-            .randr_get_monitors(self.root(), true)
-            .map_err(read_error)?
+    /// Managed toplevels from the window manager's client list.
+    pub fn windows(&self) -> Result<Vec<X11Window>> {
+        let reply = self
+            .conn
+            .get_property(
+                false,
+                self.root,
+                self.atoms.client_list,
+                AtomEnum::WINDOW,
+                0,
+                4096,
+            )
+            .map_err(fail)?
             .reply()
-            .map_err(read_error)?;
-        Ok(
-            json!({"coordinate_space":"x11_root_pixels","root":self.root(),"displays":monitors.monitors.iter().map(|m| json!({"id":m.name,"primary":m.primary,"bounds":{"x":m.x,"y":m.y,"width":m.width,"height":m.height},"physical_mm":{"width":m.width_in_millimeters,"height":m.height_in_millimeters},"outputs":m.outputs})).collect::<Vec<_>>() }),
-        )
+            .map_err(fail)?;
+        let ids: Vec<Window> = reply.value32().map(|v| v.collect()).unwrap_or_default();
+        Ok(ids
+            .into_iter()
+            .filter_map(|w| self.window_record(w).ok())
+            .collect())
     }
-    fn point(&self, p: &Point) -> Result<(i16, i16)> {
-        let bounds = self.bounds(self.root())?;
-        validate_point(p, bounds.width, bounds.height)
+    /// The mapped toplevel of a pid, narrowed by title when given.
+    pub fn window_for(&self, pid: u32, title: Option<&str>) -> Result<X11Window> {
+        self.windows()?
+            .into_iter()
+            .find(|w| {
+                w.mapped
+                    && w.pid == Some(pid)
+                    && title.is_none_or(|t| w.title.as_deref() == Some(t))
+            })
+            .ok_or_else(|| {
+                NativeError::new(
+                    "no_window",
+                    format!(
+                        "No mapped X11 window belongs to pid {pid}{}",
+                        title.map(|t| format!(" titled {t:?}")).unwrap_or_default()
+                    ),
+                )
+            })
     }
-    fn fake(&self, kind: u8, detail: u8, point: (i16, i16)) -> Result<()> {
-        self.connection
-            .xtest_fake_input(kind, detail, CURRENT_TIME, self.root(), point.0, point.1, 0)
-            .map_err(input_error)?
-            .check()
-            .map_err(input_error)
+    fn flush(&self) -> Result<()> {
+        self.conn.flush().map_err(fail)
     }
-    fn modifier_codes(&self, m: Modifiers) -> Result<Vec<u8>> {
-        let requested = [
-            (m.shift, 0xffe1),
-            (m.control, 0xffe3),
-            (m.alt, 0xffe9),
-            (m.meta, 0xffeb),
-        ];
-        let setup = self.connection.setup();
-        let mapping = self
-            .connection
-            .get_keyboard_mapping(setup.min_keycode, setup.max_keycode - setup.min_keycode + 1)
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        if mapping.keysyms_per_keycode == 0 {
-            return Err(error(
-                "invalid_keymap",
-                "X server returned an empty keyboard mapping",
-            ));
-        }
-        let mut keys = Vec::new();
-        for (_, sym) in requested.into_iter().filter(|(enabled, _)| *enabled) {
-            let index = mapping
-                .keysyms
-                .chunks(mapping.keysyms_per_keycode.into())
-                .position(|v| v.contains(&sym))
-                .ok_or_else(|| {
-                    unsupported(format!("Modifier keysym {sym:#x} has no native keycode"))
-                })?;
-            keys.push(setup.min_keycode + index as u8);
-        }
-        self.ensure_idle_pointer()?;
-        let held = self
-            .connection
-            .query_keymap()
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        if keys
-            .iter()
-            .any(|k| held.keys[*k as usize / 8] & (1 << (*k % 8)) != 0)
-        {
-            return Err(error(
-                "input_busy",
-                "A requested modifier is already held; no input was sent",
-            ));
-        }
-        Ok(keys)
-    }
-    fn with_modifiers(&self, keys: &[u8], action: impl FnOnce() -> Result<()>) -> Result<()> {
-        let mut pressed = Vec::new();
-        let result = (|| {
-            for &key in keys {
-                pressed.push(key);
-                self.fake(KEY_PRESS_EVENT, key, (0, 0))?;
-            }
-            action()
-        })();
-        let mut release_error = None;
-        for &key in pressed.iter().rev() {
-            if let Err(e) = self.fake(KEY_RELEASE_EVENT, key, (0, 0)) {
-                release_error = Some(e);
-                let _ = self.fake(KEY_RELEASE_EVENT, key, (0, 0));
-            }
-        }
-        result.and(release_error.map_or(Ok(()), Err))
-    }
-    fn ensure_idle_pointer(&self) -> Result<()> {
-        let pointer = self
-            .connection
-            .query_pointer(self.root())
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        let keys = self
-            .connection
-            .query_keymap()
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        if u16::from(pointer.mask) & 0x1f00 != 0 || keys.keys.iter().any(|v| *v != 0) {
-            return Err(error(
-                "input_busy",
-                "A mouse button or keyboard key is already held; no input was sent",
-            ));
-        }
+    fn fake(&self, kind: u8, detail: u8, x: i16, y: i16) -> Result<()> {
+        self.conn
+            .xtest_fake_input(kind, detail, x11rb::CURRENT_TIME, self.root, x, y, 0)
+            .map_err(fail)?;
         Ok(())
     }
-    /// Positive vertical detents scroll down; positive horizontal detents scroll right.
-    pub fn wheel(&self, vertical: i32, horizontal: i32, point: Option<Point>) -> Result<Receipt> {
-        if vertical.unsigned_abs() > 1000 || horizontal.unsigned_abs() > 1000 {
-            return Err(error(
-                "invalid_scroll",
-                "Wheel is limited to 1000 detents per axis",
+    fn motion(&self, point: &Point) -> Result<()> {
+        let point = self.space.to_x(point.clone());
+        if point.x.abs() >= 32767. || point.y.abs() >= 32767. {
+            return Err(NativeError::invalid_request(
+                "X coordinates must fit 16 bits",
             ));
         }
-        let point = point.as_ref().map(|p| self.point(p)).transpose()?;
-        self.ensure_idle_pointer()?;
-        if let Some(p) = point {
-            self.fake(MOTION_NOTIFY_EVENT, 0, p)?;
-        }
-        for (amount, positive, negative) in [(vertical, 5, 4), (horizontal, 7, 6)] {
-            for _ in 0..amount.unsigned_abs() {
-                self.pair(
-                    BUTTON_PRESS_EVENT,
-                    BUTTON_RELEASE_EVENT,
-                    if amount > 0 { positive } else { negative },
-                    (0, 0),
-                )?;
+        self.fake(
+            MOTION_NOTIFY,
+            0,
+            point.x.round() as i16,
+            point.y.round() as i16,
+        )
+    }
+    fn button(&self, button: u8, pressed: bool) -> Result<()> {
+        self.fake(
+            if pressed {
+                BUTTON_PRESS
+            } else {
+                BUTTON_RELEASE
+            },
+            button,
+            0,
+            0,
+        )
+    }
+    /// Key code for a keysym in the cached mapping, remapping a spare
+    /// key code when the symbol is absent. Remaps are restored on drop.
+    /// Returns whether a remap was issued, so callers can let clients
+    /// observe the new mapping before the key arrives.
+    fn keycode_for(&mut self, keysym: u32) -> Result<(u8, bool)> {
+        let per = usize::from(self.mapping.per);
+        let mut spare = None;
+        for (i, chunk) in self.mapping.keysyms.chunks(per).enumerate() {
+            let code = self.mapping.min + i as u8;
+            if chunk.first().copied() == Some(keysym) {
+                return Ok((code, false));
+            }
+            if spare.is_none() && chunk.iter().all(|k| *k == 0) && code > self.mapping.min + 8 {
+                spare = Some((code, chunk.to_vec()));
             }
         }
-        Ok(Receipt {
-            effect: Effect::Dispatched,
-            route: "x11_xtest_wheel_detents".into(),
-        })
-    }
-    fn pair(&self, press: u8, release: u8, detail: u8, point: (i16, i16)) -> Result<()> {
-        let pressed = self.fake(press, detail, point);
-        // A connection failure may happen after server acceptance. Always attempt
-        // release, even when the press acknowledgement was lost.
-        let released = self.fake(release, detail, point);
-        if released.is_err() {
-            let _ = self.fake(release, detail, point);
+        let (code, original) =
+            spare.ok_or_else(|| NativeError::unsupported("No spare X key code for remapping"))?;
+        let mut symbols = vec![0u32; per];
+        symbols[0] = keysym;
+        self.conn
+            .change_keyboard_mapping(1, code, self.mapping.per, &symbols)
+            .map_err(fail)?;
+        self.flush()?;
+        let offset = usize::from(code - self.mapping.min) * per;
+        self.mapping.keysyms[offset..offset + per].copy_from_slice(&symbols);
+        if self.remapped.is_none() {
+            self.remapped = Some((code, original));
         }
-        pressed.and(released)
+        Ok((code, true))
     }
-    pub fn capture_root(&self, path: &Path) -> Result<Frame> {
-        let root = self.root();
-        let g = self
-            .connection
-            .get_geometry(root)
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        capture_budget(g.width as usize, g.height as usize)?;
+    fn restore_mapping(&mut self) {
+        if let Some((code, original)) = self.remapped.take() {
+            let _ = self
+                .conn
+                .change_keyboard_mapping(1, code, original.len() as u8, &original);
+            let _ = self.flush();
+        }
+    }
+    fn modifier_codes(&mut self, modifiers: Modifiers) -> Result<Vec<u8>> {
+        let mut codes = vec![];
+        for (flag, keysym) in [
+            (modifiers.shift, XK_SHIFT_L),
+            (modifiers.control, XK_CONTROL_L),
+            (modifiers.alt, XK_ALT_L),
+            (modifiers.meta, XK_SUPER_L),
+        ] {
+            if flag {
+                codes.push(self.keycode_for(keysym)?.0);
+            }
+        }
+        Ok(codes)
+    }
+    /// Pixels of a viewable X window drawable. Under rootless Xwayland the
+    /// root has no content; only windows can be captured.
+    pub fn capture_window(
+        &self,
+        window_id: u32,
+        path: &Path,
+    ) -> Result<crate::wayland_capture::Frame> {
+        let record = self.window_record(window_id)?;
+        if !record.mapped {
+            return Err(NativeError::new("no_window", "Window is not viewable"));
+        }
+        let (w, h) = (record.x_bounds.width as u16, record.x_bounds.height as u16);
         let image = self
-            .connection
-            .get_image(
-                ImageFormat::Z_PIXMAP,
-                root,
-                0,
-                0,
-                g.width,
-                g.height,
-                u32::MAX,
-            )
-            .map_err(read_error)?
+            .conn
+            .get_image(ImageFormat::Z_PIXMAP, window_id, 0, 0, w, h, !0)
+            .map_err(fail)?
             .reply()
-            .map_err(read_error)?;
-        let screen = &self.connection.setup().roots[self.screen];
-        let visual = screen
-            .allowed_depths
-            .iter()
-            .flat_map(|d| &d.visuals)
-            .find(|v| v.visual_id == image.visual)
-            .ok_or_else(|| unsupported("Capture visual is not described by the X server"))?;
-        if visual.class != VisualClass::TRUE_COLOR {
-            return Err(unsupported("Capture currently requires a TrueColor visual"));
+            .map_err(|e| NativeError::new("capture_failed", e))?;
+        if image.depth != 24 && image.depth != 32 {
+            return Err(NativeError::new(
+                "capture_failed",
+                format!("Unsupported depth {}", image.depth),
+            ));
         }
-        let format = self
-            .connection
-            .setup()
-            .pixmap_formats
+        let rgba: Vec<u8> = image
+            .data
+            .as_chunks::<4>()
+            .0
             .iter()
-            .find(|f| f.depth == image.depth)
-            .ok_or_else(|| unsupported("No pixmap format for capture depth"))?;
-        let rgb = decode_rgb(
-            &image.data,
-            g.width as usize,
-            g.height as usize,
-            format.bits_per_pixel,
-            format.scanline_pad,
-            self.connection.setup().image_byte_order == ImageOrder::LSB_FIRST,
-            [visual.red_mask, visual.green_mask, visual.blue_mask],
-        )?;
-        let file = File::create(path).map_err(|e| error("capture_write", e))?;
-        let mut encoder = png::Encoder::new(file, g.width.into(), g.height.into());
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder
-            .write_header()
-            .map_err(|e| error("capture_encode", e))?
-            .write_image_data(&rgb)
-            .map_err(|e| error("capture_encode", e))?;
-        Ok(Frame {
-            path: path.to_string_lossy().into_owned(),
-            mapping: FrameMapping {
-                source_bounds: Rect {
-                    x: 0.,
-                    y: 0.,
-                    width: g.width.into(),
-                    height: g.height.into(),
-                },
-                pixel_width: g.width.into(),
-                pixel_height: g.height.into(),
-                geometry_revision: format!("x11:{root}:{}:{}", g.width, g.height),
+            .flat_map(|px| [px[2], px[1], px[0], 255])
+            .collect();
+        let path = unimation::image::absolute_output(path)?;
+        write_png(&path, u32::from(w), u32::from(h), &rgba)?;
+        let revision = serde_json::to_string(&record).map_err(fail)?;
+        Ok(crate::wayland_capture::Frame {
+            source: crate::wayland_capture::CaptureSource::Region {
+                x: record.bounds.x,
+                y: record.bounds.y,
+                width: record.bounds.width,
+                height: record.bounds.height,
             },
-            coordinate_space: "x11_root_pixels",
-            cursor_included: false,
+            path,
+            route: "linux.x11.get_image".into(),
+            mapping: FrameMapping {
+                source_bounds: record.bounds,
+                pixel_width: u32::from(w),
+                pixel_height: u32::from(h),
+                geometry_revision: revision,
+            },
+            toplevel: None,
         })
     }
-}
-impl Discover for X11 {
-    fn discover(&mut self) -> Result<Value> {
-        self.windows()
+    pub fn window_revision(&self, window_id: u32) -> Result<String> {
+        serde_json::to_string(&self.window_record(window_id)?).map_err(fail)
+    }
+    fn route(&self, device: &str) -> Receipt {
+        Receipt::dispatched(format!(
+            "linux.x11.xtest.{device}{}",
+            if self.xwayland { ".xwayland_local" } else { "" }
+        ))
+    }
+    fn send_synthetic_button(
+        &self,
+        window: Window,
+        point: &Point,
+        button: u8,
+        pressed: bool,
+    ) -> Result<()> {
+        let translated = self
+            .conn
+            .translate_coordinates(
+                self.root,
+                window,
+                point.x.round() as i16,
+                point.y.round() as i16,
+            )
+            .map_err(fail)?
+            .reply()
+            .map_err(fail)?;
+        let event = xproto::ButtonPressEvent {
+            response_type: if pressed {
+                BUTTON_PRESS
+            } else {
+                BUTTON_RELEASE
+            },
+            detail: button,
+            sequence: 0,
+            time: x11rb::CURRENT_TIME,
+            root: self.root,
+            event: window,
+            child: x11rb::NONE,
+            root_x: point.x.round() as i16,
+            root_y: point.y.round() as i16,
+            event_x: translated.dst_x,
+            event_y: translated.dst_y,
+            state: 0u16.into(),
+            same_screen: true,
+        };
+        let mask = if pressed {
+            xproto::EventMask::BUTTON_PRESS
+        } else {
+            xproto::EventMask::BUTTON_RELEASE
+        };
+        self.conn
+            .send_event(true, window, mask, event)
+            .map_err(fail)?;
+        Ok(())
+    }
+    /// Synthetic `send_event` delivery to one window. Many toolkits ignore
+    /// synthetic events; the receipt reports delivery, not consumption.
+    pub fn click_window(
+        &self,
+        window: Window,
+        point: &Point,
+        button: MouseButton,
+        count: u8,
+    ) -> Result<Receipt> {
+        let action = PointerAction::Click {
+            point: point.clone(),
+            button,
+            count,
+            modifiers: Modifiers::default(),
+        };
+        action.validate()?;
+        let point = self.space.to_x(point.clone());
+        let detail = button_number(button);
+        for _ in 0..count {
+            self.send_synthetic_button(window, &point, detail, true)?;
+            self.send_synthetic_button(window, &point, detail, false)?;
+        }
+        self.flush()?;
+        Ok(Receipt::dispatched("linux.x11.send_event"))
     }
 }
-impl Capture for X11 {
-    type Request = std::path::PathBuf;
-    type Frame = Frame;
-    fn capture(&mut self, path: Self::Request) -> Result<Frame> {
-        self.capture_root(&path)
+impl Drop for X11 {
+    fn drop(&mut self) {
+        self.restore_mapping();
     }
 }
+
+fn button_number(button: MouseButton) -> u8 {
+    match button {
+        MouseButton::Left => 1,
+        MouseButton::Middle => 2,
+        MouseButton::Right => 3,
+    }
+}
+const PROCESS_REASON: &str =
+    "XTest is server-wide; process delivery uses the click_window synthetic route";
+fn keysym_for(c: char) -> u32 {
+    CONTROL_KEYSYMS
+        .iter()
+        .find(|(ch, _, _)| *ch == c)
+        .map(|(_, _, keysym)| *keysym)
+        .unwrap_or(if (c as u32) < 0x100 {
+            c as u32
+        } else {
+            0x0100_0000 | c as u32
+        })
+}
+
 impl PointerInput for X11 {
     fn pointer(&mut self, delivery: Delivery, action: PointerAction) -> Result<Receipt> {
-        if !matches!(delivery, Delivery::Global {}) {
-            return Err(unsupported(
-                "XTEST is global input; process delivery is not supported",
-            ));
-        }
-        self.connection
-            .xtest_get_version(2, 2)
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        self.ensure_idle_pointer()?;
+        delivery.require_global(PROCESS_REASON)?;
+        action.validate()?;
         match action {
-            PointerAction::Move { point } => {
-                self.fake(MOTION_NOTIFY_EVENT, 0, self.point(&point)?)?
-            }
+            PointerAction::Move { point } => self.motion(&point)?,
             PointerAction::Click {
                 point,
                 button,
                 count,
                 modifiers,
             } => {
-                if count == 0 || count > 3 {
-                    return Err(error("invalid_click_count", "Click count must be 1..=3"));
+                let held = self.modifier_codes(modifiers)?;
+                self.motion(&point)?;
+                for code in &held {
+                    self.fake(KEY_PRESS, *code, 0, 0)?;
                 }
-                let point = self.point(&point)?;
-                let keys = self.modifier_codes(modifiers)?;
-                self.with_modifiers(&keys, || {
-                    self.fake(MOTION_NOTIFY_EVENT, 0, point)?;
-                    for i in 0..count {
-                        self.pair(
-                            BUTTON_PRESS_EVENT,
-                            BUTTON_RELEASE_EVENT,
-                            button_id(button),
-                            point,
-                        )?;
-                        if i + 1 < count {
-                            std::thread::sleep(Duration::from_millis(80));
-                        }
+                for n in 0..count {
+                    if n > 0 {
+                        self.flush()?;
+                        std::thread::sleep(Duration::from_millis(60));
                     }
-                    Ok(())
-                })?;
+                    self.button(button_number(button), true)?;
+                    self.button(button_number(button), false)?;
+                }
+                for code in held.iter().rev() {
+                    self.fake(KEY_RELEASE, *code, 0, 0)?;
+                }
             }
-            PointerAction::Scroll { .. } => {
-                return Err(unsupported(
-                    "XTEST provides wheel detents, not pixel scrolling; use the explicit x11_wheel extension",
-                ));
+            PointerAction::Scroll {
+                vertical,
+                horizontal,
+                point,
+            } => {
+                if let Some(point) = &point {
+                    self.motion(point)?;
+                }
+                // Positive vertical scrolls content up (button 4), matching macOS.
+                for (steps, up, down) in [(vertical, 4, 5), (horizontal, 6, 7)] {
+                    let button = if steps >= 0 { up } else { down };
+                    let clicks = (steps.unsigned_abs() / 15).clamp(u32::from(steps != 0), 100);
+                    for _ in 0..clicks {
+                        self.button(button, true)?;
+                        self.button(button, false)?;
+                    }
+                }
             }
             PointerAction::Drag {
                 from,
@@ -432,225 +610,101 @@ impl PointerInput for X11 {
                 modifiers,
                 duration_ms,
             } => {
-                if duration_ms > 30_000 {
-                    return Err(error(
-                        "invalid_duration",
-                        "Drag duration must be at most 30000 ms",
-                    ));
+                let plan = MotionPlan::for_drag((from.x, from.y), (to.x, to.y), duration_ms)?;
+                let held = self.modifier_codes(modifiers)?;
+                for code in &held {
+                    self.fake(KEY_PRESS, *code, 0, 0)?;
                 }
-                let from = self.point(&from)?;
-                let to = self.point(&to)?;
-                let keys = self.modifier_codes(modifiers)?;
-                let plan = MotionPlan::new(
-                    (from.0.into(), from.1.into()),
-                    (to.0.into(), to.1.into()),
-                    Duration::from_millis(duration_ms),
-                    ((duration_ms / 16).max(1)) as usize,
-                    MotionStyle::Straight,
-                )?;
-                self.with_modifiers(&keys, || {
-                    self.fake(MOTION_NOTIFY_EVENT, 0, from)?;
-                    if let Err(e) = self.fake(BUTTON_PRESS_EVENT, button_id(button), from) {
-                        let _ = self.fake(BUTTON_RELEASE_EVENT, button_id(button), from);
-                        return Err(e);
-                    }
-                    let started = Instant::now();
-                    let mut last = from;
-                    let result = (|| {
-                        for sample in plan.samples() {
-                            std::thread::sleep(sample.at.saturating_sub(started.elapsed()));
-                            let p = (
-                                sample.position.0.round() as i16,
-                                sample.position.1.round() as i16,
-                            );
-                            self.fake(MOTION_NOTIFY_EVENT, 0, p)?;
-                            last = p;
-                        }
-                        Ok(())
-                    })();
-                    let release = self.fake(BUTTON_RELEASE_EVENT, button_id(button), last);
-                    if release.is_err() {
-                        let _ = self.fake(BUTTON_RELEASE_EVENT, button_id(button), last);
-                    }
-                    result.and(release)
+                self.motion(&from)?;
+                self.button(button_number(button), true)?;
+                self.flush()?;
+                plan.walk(|sample| {
+                    self.motion(&Point {
+                        x: sample.position.0,
+                        y: sample.position.1,
+                    })?;
+                    self.flush()
                 })?;
+                self.button(button_number(button), false)?;
+                for code in held.iter().rev() {
+                    self.fake(KEY_RELEASE, *code, 0, 0)?;
+                }
             }
         }
-        Ok(Receipt {
-            effect: Effect::Dispatched,
-            route: "x11_xtest_global".into(),
-        })
+        self.flush()?;
+        Ok(self.route("pointer"))
+    }
+}
+impl TextInput for X11 {
+    fn type_text(&mut self, delivery: Delivery, text: &str) -> Result<Receipt> {
+        delivery.require_global(PROCESS_REASON)?;
+        for c in text.chars() {
+            if c == '\r' {
+                continue;
+            }
+            let (code, remapped) = self.keycode_for(keysym_for(c))?;
+            if remapped {
+                // Let clients that read the mapping notice the change first.
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            self.fake(KEY_PRESS, code, 0, 0)?;
+            self.fake(KEY_RELEASE, code, 0, 0)?;
+            self.flush()?;
+        }
+        Ok(self.route("keyboard"))
     }
 }
 impl KeyboardInput for X11 {
     type Key = KeyChord;
-    fn key_press(&mut self, delivery: Delivery, chord: KeyChord) -> Result<Receipt> {
-        if !matches!(delivery, Delivery::Global {}) {
-            return Err(unsupported("XTEST keyboard input is global"));
+    /// `key_code` is a Linux evdev code; X adds its offset of 8.
+    fn key_press(&mut self, delivery: Delivery, key: KeyChord) -> Result<Receipt> {
+        delivery.require_global(PROCESS_REASON)?;
+        let code = u8::try_from(key.key_code + 8)
+            .map_err(|_| NativeError::invalid_request("X key codes are limited to 255"))?;
+        let held = self.modifier_codes(key.modifiers)?;
+        for m in &held {
+            self.fake(KEY_PRESS, *m, 0, 0)?;
         }
-        let key = u8::try_from(chord.key_code)
-            .map_err(|_| error("invalid_key", "X11 keycode must fit u8"))?;
-        let setup = self.connection.setup();
-        if key < setup.min_keycode || key > setup.max_keycode {
-            return Err(error("invalid_key", "Keycode is outside the server keymap"));
+        self.fake(KEY_PRESS, code, 0, 0)?;
+        self.fake(KEY_RELEASE, code, 0, 0)?;
+        for m in held.iter().rev() {
+            self.fake(KEY_RELEASE, *m, 0, 0)?;
         }
-        let keys = self.modifier_codes(chord.modifiers)?;
-        if keys.contains(&key) {
-            return Err(error(
-                "invalid_key",
-                "Main key cannot also be a requested modifier",
-            ));
-        }
-        let held = self
-            .connection
-            .query_keymap()
-            .map_err(read_error)?
-            .reply()
-            .map_err(read_error)?;
-        if held.keys[key as usize / 8] & (1 << (key % 8)) != 0 {
-            return Err(error("input_busy", "Requested key is already held"));
-        }
-        self.with_modifiers(&keys, || {
-            self.pair(KEY_PRESS_EVENT, KEY_RELEASE_EVENT, key, (0, 0))
-        })?;
-        Ok(Receipt {
-            effect: Effect::Dispatched,
-            route: "x11_xtest_global".into(),
-        })
+        self.flush()?;
+        Ok(self.route("keyboard"))
     }
 }
-fn button_id(button: MouseButton) -> u8 {
-    match button {
-        MouseButton::Left => 1,
-        MouseButton::Middle => 2,
-        MouseButton::Right => 3,
-    }
-}
-fn read_error(e: impl ToString) -> unimation::NativeError {
-    error("x11_request", e)
-}
-fn input_error(e: impl ToString) -> unimation::NativeError {
-    unimation::NativeError {
-        code: "x11_input".into(),
-        message: e.to_string(),
-        effect: Effect::Unknown,
-    }
-}
-fn validate_point(p: &Point, width: f64, height: f64) -> Result<(i16, i16)> {
-    if !p.x.is_finite()
-        || !p.y.is_finite()
-        || p.x < 0.
-        || p.y < 0.
-        || p.x.round() >= width
-        || p.y.round() >= height
-        || p.x.round() > i16::MAX as f64
-        || p.y.round() > i16::MAX as f64
-    {
-        return Err(error(
-            "invalid_coordinate",
-            "Point is outside the X11 root or protocol coordinate range",
-        ));
-    }
-    Ok((p.x.round() as i16, p.y.round() as i16))
-}
-fn decode_rgb(
-    data: &[u8],
-    width: usize,
-    height: usize,
-    bits: u8,
-    pad: u8,
-    little: bool,
-    masks: [u32; 3],
-) -> Result<Vec<u8>> {
-    capture_budget(width, height)?;
-    if ![16, 24, 32].contains(&bits) || ![8, 16, 32].contains(&pad) || masks.contains(&0) {
-        return Err(unsupported("Unsupported X11 pixel layout"));
-    }
-    let stride = (width * bits as usize).div_ceil(pad as usize) * (pad as usize / 8);
-    let bytes = bits as usize / 8;
-    if data.len() < stride * height {
-        return Err(error(
-            "invalid_capture",
-            "X11 image is shorter than its declared layout",
-        ));
-    }
-    let mut rgb = Vec::with_capacity(width * height * 3);
-    for row in data.chunks(stride).take(height) {
-        for pixel in row[..width * bytes].chunks(bytes) {
-            let mut value = 0u32;
-            for (i, b) in pixel.iter().enumerate() {
-                value |= (*b as u32) << if little { i * 8 } else { (bytes - i - 1) * 8 };
-            }
-            for mask in masks {
-                let shift = mask.trailing_zeros();
-                let max = mask >> shift;
-                rgb.push(
-                    ((((value & mask) >> shift) as u64 * 255 + max as u64 / 2) / max as u64) as u8,
-                );
-            }
-        }
-    }
-    Ok(rgb)
-}
-fn capture_budget(width: usize, height: usize) -> Result<()> {
-    // Bound both the incoming four-byte layout and outgoing RGB allocation.
-    if width == 0
-        || height == 0
-        || width
-            .checked_mul(height)
-            .and_then(|v| v.checked_mul(7))
-            .is_none_or(|bytes| bytes > 256 * 1024 * 1024)
-    {
-        return Err(error(
-            "capture_limit",
-            "Capture needs more than the 256 MiB combined image budget or has empty dimensions",
-        ));
-    }
-    Ok(())
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn capture_budget_rejects_overflow_and_excess_before_allocation() {
-        assert!(capture_budget(usize::MAX, 2).is_err());
-        assert!(capture_budget(65535, 65535).is_err());
-        assert!(capture_budget(0, 1080).is_err());
-        assert!(capture_budget(3840, 2160).is_ok());
+    fn keysyms_follow_x_conventions() {
+        assert_eq!(keysym_for('a'), 0x61);
+        assert_eq!(keysym_for('\n'), 0xff0d);
+        assert_eq!(keysym_for('🦀'), 0x0100_0000 | 0x1F980);
+        assert_eq!(button_number(MouseButton::Right), 3);
     }
     #[test]
-    fn capture_decodes_stride_endianness_and_rgb565() {
-        assert_eq!(
-            decode_rgb(&[0, 0xf8, 0, 0], 1, 1, 16, 32, true, [0xf800, 0x7e0, 0x1f]).unwrap(),
-            [255, 0, 0]
-        );
-        assert_eq!(
-            decode_rgb(
-                &[0, 0x12, 0x34, 0x56],
-                1,
-                1,
-                32,
-                32,
-                false,
-                [0xff0000, 0xff00, 0xff]
-            )
-            .unwrap(),
-            [0x12, 0x34, 0x56]
-        );
-    }
-    #[test]
-    fn points_reject_nonfinite_and_rounded_outside() {
-        for p in [
-            Point { x: f64::NAN, y: 0. },
-            Point { x: -1., y: 0. },
-            Point { x: 99.6, y: 0. },
-            Point { x: 40000., y: 0. },
-        ] {
-            assert!(validate_point(&p, 100., 100.).is_err());
-        }
-        assert_eq!(
-            validate_point(&Point { x: 25.4, y: 9.8 }, 100., 100.).unwrap(),
-            (25, 10)
-        );
+    fn x_space_scales_per_monitor() {
+        let space = XSpace::from_monitors(vec![(
+            Rect {
+                x: 0.,
+                y: 0.,
+                width: 1536.,
+                height: 960.,
+            },
+            1.25,
+        )]);
+        let p = space.to_x(Point { x: 100., y: 40. });
+        assert_eq!((p.x, p.y), (125., 50.));
+        let r = space.to_logical(Rect {
+            x: 1441.,
+            y: 38.,
+            width: 473.,
+            height: 1155.,
+        });
+        assert!((r.x - 1152.8).abs() < 0.01 && (r.width - 378.4).abs() < 0.01);
+        assert_eq!(XSpace::identity().to_x(Point { x: 3., y: 4. }).x, 3.);
     }
 }

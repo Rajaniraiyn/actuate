@@ -1,7 +1,9 @@
 //! Lossy agent views of retained observations. Filtering never changes native references.
 use crate::{
-    Effect, ElementRef, NativeError, Node, Result, Snapshot,
+    ElementRef, NativeError, Node, Result, Snapshot,
     diff::{ChangeEvidence, SnapshotDiff},
+    schema::{self, BoundsEncoding, NativeSchema},
+    values,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -125,136 +127,66 @@ pub trait PresentationAdapter {
         false
     }
 }
-pub struct AxPresentationAdapter;
-impl PresentationAdapter for AxPresentationAdapter {
+/// Data-driven adapter for any provider whose vocabulary is a `NativeSchema`.
+#[derive(Debug, Clone, Copy)]
+pub struct SchemaAdapter(pub &'static NativeSchema);
+impl Default for SchemaAdapter {
+    fn default() -> Self {
+        Self(&schema::MACOS_AX)
+    }
+}
+impl PresentationAdapter for SchemaAdapter {
     fn project(&self, node: &Node, depth: usize, max_text_chars: usize) -> CompactNode {
-        compact(node, depth, max_text_chars)
+        compact(self.0, node, depth, max_text_chars)
     }
     fn value_is_comparable(&self, node: &Node) -> bool {
-        node.attributes.get("AXValue").and_then(ax_scalar).is_some()
+        node.attributes
+            .get(self.0.value)
+            .and_then(values::scalar)
+            .is_some()
     }
     fn has_uncertain_values(&self, node: &Node) -> bool {
-        node.attributes.contains_key("AXValue") && !self.value_is_comparable(node)
+        node.attributes.contains_key(self.0.value) && !self.value_is_comparable(node)
     }
     fn bounds(&self, node: &Node) -> Option<ViewportBounds> {
-        let p = node.attributes.get("AXPosition")?;
-        let s = node.attributes.get("AXSize")?;
-        if p.get("type")?.as_str()? != "point" || s.get("type")?.as_str()? != "size" {
-            return None;
-        }
-        let b = ViewportBounds {
-            x: p.get("x")?.as_f64()?,
-            y: p.get("y")?.as_f64()?,
-            width: s.get("width")?.as_f64()?,
-            height: s.get("height")?.as_f64()?,
+        let b = match self.0.bounds {
+            BoundsEncoding::PointAndSize { position, size } => {
+                let p = node.attributes.get(position)?;
+                let s = node.attributes.get(size)?;
+                if p.get("type")?.as_str()? != "point" || s.get("type")?.as_str()? != "size" {
+                    return None;
+                }
+                ViewportBounds {
+                    x: p.get("x")?.as_f64()?,
+                    y: p.get("y")?.as_f64()?,
+                    width: s.get("width")?.as_f64()?,
+                    height: s.get("height")?.as_f64()?,
+                }
+            }
+            BoundsEncoding::Rect(name) => {
+                let r = node.attributes.get(name)?;
+                if r.get("type")?.as_str()? != "rect" {
+                    return None;
+                }
+                ViewportBounds {
+                    x: r.get("x")?.as_f64()?,
+                    y: r.get("y")?.as_f64()?,
+                    width: r.get("width")?.as_f64()?,
+                    height: r.get("height")?.as_f64()?,
+                }
+            }
         };
         b.valid().then_some(b)
     }
     fn is_viewport(&self, node: &Node) -> bool {
-        matches!(
-            node.attributes.get("AXRole").and_then(string),
-            Some("AXScrollArea" | "AXWindow")
-        )
+        self.0
+            .role(node)
+            .is_some_and(|role| self.0.viewport_roles.contains(&role))
     }
     fn is_scroll_container(&self, node: &Node) -> bool {
-        node.attributes.get("AXRole").and_then(string) == Some("AXScrollArea")
-    }
-}
-fn uses_ax_attributes(node: &Node) -> bool {
-    node.attributes.keys().any(|key| key.starts_with("AX"))
-        || node.actions.iter().any(|action| action.starts_with("AX"))
-}
-/// Default projection for native AX records and neutral desktop provider fields.
-/// Native observations remain unchanged; visibility does not imply hit-testability.
-pub struct NativePresentationAdapter;
-impl PresentationAdapter for NativePresentationAdapter {
-    fn project(&self, node: &Node, depth: usize, limit: usize) -> CompactNode {
-        if uses_ax_attributes(node) {
-            return AxPresentationAdapter.project(node, depth, limit);
-        }
-        let mut output = compact(node, depth, limit);
-        let text = |key: &str| node.attributes.get(key).and_then(string);
-        output.role = text("role").map(|s| preview(s, limit));
-        let name = ["name", "description"]
-            .into_iter()
-            .find_map(|key| text(key).filter(|s| !s.is_empty()).map(|s| (key, s)));
-        output.name = name.map(|(_, s)| preview(s, limit));
-        output.name_attribute = name.map(|(key, _)| key.into());
-        output.value = node.attributes.get("value").map(|v| {
-            preview(
-                &ax_scalar(v).unwrap_or_else(|| "<unknown; inspect>".into()),
-                limit,
-            )
-        });
-        output.enabled = boolean(node, "enabled");
-        output.focused = boolean(node, "focused");
-        output.selected = boolean(node, "selected");
-        output.expanded = boolean(node, "expanded");
-        output.visibility_evidence = ["hidden", "offscreen", "visible", "showing"]
-            .into_iter()
-            .filter_map(|key| {
-                boolean(node, key).map(|value| VisibilityEvidence {
-                    attribute: key.into(),
-                    value,
-                })
-            })
-            .collect();
-        let hidden = output.visibility_evidence.iter().any(|e| {
-            if matches!(e.attribute.as_str(), "visible" | "showing") {
-                !e.value
-            } else {
-                e.value
-            }
-        });
-        output.visibility = if hidden {
-            Visibility::Hidden
-        } else {
-            Visibility::Unknown
-        };
-        // UIA offscreen=false and AT-SPI showing=true do not prove unobscured pixels.
-        output.interactive_candidate = !node.actions.is_empty();
-        output.retain_context = matches!(
-            text("role"),
-            Some("application" | "window" | "frame" | "dialog" | "scroll pane")
-        );
-        output
-    }
-    fn value_is_comparable(&self, node: &Node) -> bool {
-        if uses_ax_attributes(node) {
-            return AxPresentationAdapter.value_is_comparable(node);
-        }
-        node.attributes.get("value").and_then(ax_scalar).is_some()
-    }
-    fn has_uncertain_values(&self, node: &Node) -> bool {
-        if uses_ax_attributes(node) {
-            return AxPresentationAdapter.has_uncertain_values(node);
-        }
-        node.attributes.contains_key("value") && !self.value_is_comparable(node)
-    }
-    fn bounds(&self, node: &Node) -> Option<ViewportBounds> {
-        if uses_ax_attributes(node) {
-            return AxPresentationAdapter.bounds(node);
-        }
-        let bounds = node.attributes.get("bounds")?;
-        let bounds = ViewportBounds {
-            x: bounds.get("x")?.as_f64()?,
-            y: bounds.get("y")?.as_f64()?,
-            width: bounds.get("width")?.as_f64()?,
-            height: bounds.get("height")?.as_f64()?,
-        };
-        bounds.valid().then_some(bounds)
-    }
-    fn is_viewport(&self, node: &Node) -> bool {
-        if uses_ax_attributes(node) {
-            return AxPresentationAdapter.is_viewport(node);
-        }
-        boolean(node, "is_viewport") == Some(true)
-    }
-    fn is_scroll_container(&self, node: &Node) -> bool {
-        if uses_ax_attributes(node) {
-            return AxPresentationAdapter.is_scroll_container(node);
-        }
-        boolean(node, "is_scroll_container") == Some(true)
+        self.0
+            .role(node)
+            .is_some_and(|role| self.0.scroll_roles.contains(&role))
     }
 }
 #[derive(Debug, Clone, Serialize)]
@@ -318,11 +250,7 @@ pub struct CompactSnapshot {
     pub rows: Vec<CompactNode>,
 }
 fn invalid(message: &str) -> NativeError {
-    NativeError {
-        code: "invalid_presentation".into(),
-        message: message.into(),
-        effect: Effect::None,
-    }
+    NativeError::new("invalid_presentation", message)
 }
 fn preview(text: &str, limit: usize) -> Preview {
     let count = text.chars().count();
@@ -331,111 +259,56 @@ fn preview(text: &str, limit: usize) -> Preview {
         omitted_chars: count.saturating_sub(limit),
     }
 }
-fn string(value: &Value) -> Option<&str> {
-    match value.get("type").and_then(Value::as_str) {
-        Some("string") => value.get("value")?.as_str(),
-        Some("attributed_string") => string(value.get("text")?),
-        _ => value.as_str(),
-    }
-}
-fn boolean(node: &Node, attribute: &str) -> Option<bool> {
-    let value = node.attributes.get(attribute)?;
-    if value.get("type").and_then(Value::as_str) == Some("bool") {
-        value.get("value")?.as_bool()
-    } else {
-        value.as_bool()
-    }
-}
-fn unavailable(value: &Value) -> usize {
+/// Counts error records that only mean an optional attribute is absent.
+fn unavailable(schema: &NativeSchema, value: &Value) -> usize {
     match value {
-        Value::Object(o)
-            if matches!(
-                o.get("type").and_then(Value::as_str),
-                Some("read_error" | "ax_error")
-            ) =>
-        {
-            usize::from(matches!(
-                value.pointer("/error/code").and_then(Value::as_str),
-                Some("ax_-25212" | "ax_-25205")
-            ))
-        }
-        Value::Object(o) => o.values().map(unavailable).sum(),
-        Value::Array(a) => a.iter().map(unavailable).sum(),
+        Value::Object(_) if values::is_error(value) => usize::from(
+            value
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .is_some_and(|code| schema.is_absent_error(code)),
+        ),
+        Value::Object(o) => o.values().map(|v| unavailable(schema, v)).sum(),
+        Value::Array(a) => a.iter().map(|v| unavailable(schema, v)).sum(),
         _ => 0,
     }
 }
-fn errors(value: &Value) -> usize {
+/// Counts error records other than expected absences.
+fn errors(schema: &NativeSchema, value: &Value) -> usize {
     match value {
-        Value::Object(object)
-            if matches!(
-                object.get("type").and_then(Value::as_str),
-                Some("read_error" | "ax_error")
-            ) =>
-        {
-            1 - usize::from(unavailable(value) > 0)
+        Value::Object(_) if values::is_error(value) => {
+            1 - usize::from(unavailable(schema, value) > 0)
         }
-        Value::Object(object) => object.values().map(errors).sum(),
-        Value::Array(values) => values.iter().map(errors).sum(),
+        Value::Object(object) => object.values().map(|v| errors(schema, v)).sum(),
+        Value::Array(items) => items.iter().map(|v| errors(schema, v)).sum(),
         _ => 0,
     }
 }
-// Only scalar data has a comparable compact AX value. Native containers,
-// opaque handles, malformed values, and errors remain available through inspect.
-fn ax_scalar(value: &Value) -> Option<String> {
-    let scalar = if value.is_object() {
-        match value.get("type").and_then(Value::as_str)? {
-            "string" | "integer" | "float" | "bool" => value.get("value")?,
-            _ => return None,
-        }
-    } else {
-        value
-    };
-    if let Some(text) = scalar.as_str() {
-        Some(text.into())
-    } else if scalar.is_number() || scalar.is_boolean() {
-        Some(scalar.to_string())
-    } else {
-        None
-    }
-}
-fn compact(node: &Node, depth: usize, limit: usize) -> CompactNode {
-    let role = node.attributes.get("AXRole").and_then(string);
-    let name = [
-        "AXTitle",
-        "AXDescription",
-        "AXLabel",
-        "AXAttributedTitle",
-        "AXAttributedDescription",
-        "AXAttributedLabel",
-    ]
-    .into_iter()
-    .find_map(|key| {
-        node.attributes
-            .get(key)
-            .and_then(string)
-            .filter(|s| !s.is_empty())
-            .map(|s| (key, s))
-    });
-    let visibility_evidence: Vec<_> = ["AXHidden", "AXVisible", "AXMinimized"]
-        .into_iter()
+fn compact(schema: &NativeSchema, node: &Node, depth: usize, limit: usize) -> CompactNode {
+    let role = schema.role(node);
+    let name = schema.name(node);
+    let hidden_keys = schema.hidden_when.iter().map(|(key, _)| *key);
+    let visible_key = std::iter::once(schema.visible_when.0)
+        .filter(|key| !schema.hidden_when.iter().any(|(k, _)| k == key));
+    let visibility_evidence: Vec<_> = hidden_keys
+        .chain(visible_key)
         .filter_map(|key| {
-            boolean(node, key).map(|value| VisibilityEvidence {
+            schema.flag(node, key).map(|value| VisibilityEvidence {
                 attribute: key.into(),
                 value,
             })
         })
         .collect();
     let hidden = visibility_evidence.iter().any(|e| {
-        if e.attribute == "AXVisible" {
-            !e.value
-        } else {
-            e.value
-        }
+        schema
+            .hidden_when
+            .iter()
+            .any(|(key, blocked)| *key == e.attribute && *blocked == e.value)
     });
-    // AXHidden=false and AXMinimized=false do not establish on-screen visibility.
+    // A false hidden flag does not establish on-screen visibility.
     let visibility = if hidden {
         Visibility::Hidden
-    } else if boolean(node, "AXVisible") == Some(true) {
+    } else if schema.flag(node, schema.visible_when.0) == Some(schema.visible_when.1) {
         Visibility::Visible
     } else {
         Visibility::Unknown
@@ -447,25 +320,21 @@ fn compact(node: &Node, depth: usize, limit: usize) -> CompactNode {
         role: role.map(|s| preview(s, limit)),
         name: name.map(|(_, s)| preview(s, limit)),
         name_attribute: name.map(|(key, _)| key.into()),
-        value: node.attributes.get("AXValue").and_then(|v| {
-            // Optional AX values are commonly absent on controls. Retain their
+        value: node.attributes.get(schema.value).and_then(|v| {
+            // Optional values are commonly absent on controls. Retain their
             // unavailable count without presenting a native error as a value.
-            if matches!(
-                v.get("type").and_then(Value::as_str),
-                Some("read_error" | "ax_error")
-            ) && unavailable(v) > 0
-            {
+            if values::is_error(v) && unavailable(schema, v) > 0 {
                 return None;
             }
             Some(preview(
-                &ax_scalar(v).unwrap_or_else(|| "<unknown; inspect>".into()),
+                &values::scalar(v).unwrap_or_else(|| "<unknown; inspect>".into()),
                 limit,
             ))
         }),
-        enabled: boolean(node, "AXEnabled"),
-        focused: boolean(node, "AXFocused"),
-        selected: boolean(node, "AXSelected"),
-        expanded: boolean(node, "AXExpanded"),
+        enabled: schema.flag(node, schema.enabled),
+        focused: schema.flag(node, schema.focused),
+        selected: schema.flag(node, schema.selected),
+        expanded: schema.flag(node, schema.expanded),
         viewport_relation: ViewportRelation::Unknown,
         viewport: None,
         scroll_container: None,
@@ -476,37 +345,35 @@ fn compact(node: &Node, depth: usize, limit: usize) -> CompactNode {
         interactive_candidate: node
             .actions
             .iter()
-            .any(|a| !matches!(a.as_str(), "AXShowMenu" | "AXScrollToVisible"))
-            || matches!(
-                role,
-                Some(
-                    "AXTextField"
-                        | "AXTextArea"
-                        | "AXComboBox"
-                        | "AXSearchField"
-                        | "AXCheckBox"
-                        | "AXRadioButton"
-                        | "AXSlider"
-                        | "AXPopUpButton"
-                        | "AXMenuItem"
-                        | "AXButton"
-                        | "AXLink"
-                        | "AXTab"
-                )
-            ),
-        retain_context: matches!(role, Some("AXWindow" | "AXScrollArea" | "AXWebArea")),
+            .any(|a| !schema.generic_actions.contains(&a.as_str()))
+            || role.is_some_and(|role| schema.is_interactive_role(role)),
+        retain_context: role.is_some_and(|role| schema.context_roles.contains(&role)),
         actions: node.actions.clone(),
-        error_count: node.issues.len() + node.attributes.values().map(errors).sum::<usize>(),
-        unavailable_count: node.attributes.values().map(unavailable).sum(),
+        error_count: node.issues.len()
+            + node
+                .attributes
+                .values()
+                .map(|v| errors(schema, v))
+                .sum::<usize>(),
+        unavailable_count: node
+            .attributes
+            .values()
+            .map(|v| unavailable(schema, v))
+            .sum(),
     }
 }
-/// Traverses AXChildren in native order. Cycles and unresolved children are reported.
-/// Observed hidden ancestors propagate through unambiguous ancestry with explicit evidence.
+/// Traverses native children in observed order. Cycles and unresolved children
+/// are reported. Observed hidden ancestors propagate through unambiguous
+/// ancestry with explicit evidence. The schema is detected from the snapshot.
 pub fn render_snapshot(
     snapshot: &Snapshot,
     options: &PresentationOptions,
 ) -> Result<CompactSnapshot> {
-    render_snapshot_with_adapter(snapshot, options, &NativePresentationAdapter)
+    render_snapshot_with_adapter(
+        snapshot,
+        options,
+        &SchemaAdapter(NativeSchema::detect(snapshot)),
+    )
 }
 pub fn render_snapshot_with_adapter(
     snapshot: &Snapshot,
@@ -753,6 +620,13 @@ pub fn render_snapshot_text(snapshot: &CompactSnapshot) -> String {
 }
 /// Every changed field remains listed. Values are previews; missing is distinct from null.
 pub fn render_diff_text(diff: &SnapshotDiff, max_text_chars: usize) -> String {
+    let schema = diff
+        .newly_observed
+        .iter()
+        .chain(&diff.removed_from_scope)
+        .chain(&diff.no_longer_observed)
+        .find_map(NativeSchema::detect_node)
+        .unwrap_or(&schema::MACOS_AX);
     let mut out = format!(
         "diff session={} root=@e{} revisions={}..{} complete={}..{} traversal_complete={}..{} issues={}..{}\n",
         serde_json::to_string(&diff.root.session).unwrap(),
@@ -772,7 +646,7 @@ pub fn render_diff_text(diff: &SnapshotDiff, max_text_chars: usize) -> String {
         ("no_longer_observed", &diff.no_longer_observed),
     ] {
         for node in nodes {
-            let row = compact(node, 0, max_text_chars);
+            let row = compact(schema, node, 0, max_text_chars);
             write!(out, "{label} @e{}", node.reference.id).unwrap();
             if let Some(role) = row.role {
                 write!(out, " role={}", quoted(&role)).unwrap();
@@ -826,7 +700,7 @@ pub fn render_view_diff(
         after,
         options,
         max_changes,
-        &NativePresentationAdapter,
+        &SchemaAdapter(NativeSchema::detect(before)),
     )
 }
 pub fn render_view_diff_with_adapter(
@@ -988,64 +862,6 @@ mod tests {
             id,
         }
     }
-    #[test]
-    fn portable_fields_render_without_claiming_visibility_or_changing_records() {
-        let mut n = node(1, &[]);
-        n.attributes = std::collections::BTreeMap::from([
-            ("role".into(), serde_json::json!("button")),
-            ("name".into(), serde_json::json!("Save")),
-            ("enabled".into(), serde_json::json!(true)),
-            ("offscreen".into(), serde_json::json!(false)),
-            (
-                "bounds".into(),
-                serde_json::json!({"x":-100,"y":20,"width":80,"height":30}),
-            ),
-        ]);
-        n.actions = vec!["invoke".into()];
-        let original = n.attributes.clone();
-        let projected = NativePresentationAdapter.project(&n, 0, 100);
-        assert_eq!(projected.name.unwrap().text, "Save");
-        assert_eq!(projected.role.unwrap().text, "button");
-        assert_eq!(projected.enabled, Some(true));
-        assert_eq!(projected.visibility, Visibility::Unknown);
-        assert!(projected.interactive_candidate);
-        assert_eq!(NativePresentationAdapter.bounds(&n).unwrap().x, -100.);
-        assert_eq!(n.attributes, original);
-        n.attributes
-            .insert("offscreen".into(), serde_json::json!(true));
-        assert_eq!(
-            NativePresentationAdapter.project(&n, 0, 100).visibility,
-            Visibility::Hidden
-        );
-        n.attributes
-            .insert("AXRole".into(), serde_json::json!("AXButton"));
-        n.attributes
-            .insert("AXTitle".into(), serde_json::json!("Native AX name"));
-        assert_eq!(
-            NativePresentationAdapter
-                .project(&n, 0, 100)
-                .name
-                .unwrap()
-                .text,
-            "Native AX name"
-        );
-    }
-    #[test]
-    fn portable_value_diff_uses_retained_scalar_values() {
-        let mut n = node(9, &[]);
-        n.attributes = std::collections::BTreeMap::from([
-            ("role".into(), serde_json::json!("slider")),
-            ("value".into(), serde_json::json!(5)),
-        ]);
-        let before = snapshot(vec![n.clone()]);
-        n.attributes.insert("value".into(), serde_json::json!(6));
-        let mut after = snapshot(vec![n]);
-        after.revision = before.revision + 1;
-        let diff = render_view_diff(&before, &after, &PresentationOptions::default(), 20).unwrap();
-        assert!(diff.contains("6"), "{diff}");
-        let rendered = render_snapshot(&after, &PresentationOptions::default()).unwrap();
-        assert_eq!(rendered.rows[0].role.as_ref().unwrap().text, "slider");
-    }
     fn node(id: u64, children: &[u64]) -> Node {
         Node {
             reference: reference(id),
@@ -1082,7 +898,55 @@ mod tests {
             parameterized_attributes: vec![],
             issues: vec![],
         };
-        assert!(!AxPresentationAdapter.is_viewport(&node));
+        assert!(!SchemaAdapter::default().is_viewport(&node));
+    }
+    #[test]
+    fn portable_fields_render_without_claiming_visibility_or_changing_records() {
+        let mut n = node(9, &[]);
+        n.attributes = std::collections::BTreeMap::from([
+            ("role".into(), json!("button")),
+            ("name".into(), json!("Save")),
+            ("enabled".into(), json!(true)),
+            ("offscreen".into(), json!(false)),
+            (
+                "bounds".into(),
+                json!({"type":"rect","x":-100,"y":20,"width":80,"height":30}),
+            ),
+        ]);
+        n.actions = vec!["invoke".into()];
+        let original = n.attributes.clone();
+        let view =
+            render_snapshot(&snapshot(vec![n.clone()]), &PresentationOptions::default()).unwrap();
+        let row = &view.rows[0];
+        assert_eq!(row.name.as_ref().unwrap().text, "Save");
+        assert_eq!(row.role.as_ref().unwrap().text, "button");
+        assert_eq!(row.enabled, Some(true));
+        assert_eq!(row.visibility, Visibility::Unknown);
+        assert!(row.interactive_candidate);
+        assert_eq!(
+            SchemaAdapter(&schema::PORTABLE).bounds(&n).unwrap().x,
+            -100.
+        );
+        assert_eq!(n.attributes, original);
+        n.attributes.insert("offscreen".into(), json!(true));
+        let hidden = render_snapshot(&snapshot(vec![n]), &PresentationOptions::default()).unwrap();
+        assert_eq!(hidden.rows[0].visibility, Visibility::Hidden);
+    }
+    #[test]
+    fn portable_value_diff_uses_retained_scalar_values() {
+        let mut n = node(9, &[]);
+        n.attributes = std::collections::BTreeMap::from([
+            ("role".into(), json!("slider")),
+            ("value".into(), json!(5)),
+        ]);
+        let before = snapshot(vec![n.clone()]);
+        n.attributes.insert("value".into(), json!(6));
+        let mut after = snapshot(vec![n]);
+        after.revision = before.revision + 1;
+        let diff = render_view_diff(&before, &after, &PresentationOptions::default(), 20).unwrap();
+        assert!(diff.contains("value before=\"5\" after=\"6\""), "{diff}");
+        let rendered = render_snapshot(&after, &PresentationOptions::default()).unwrap();
+        assert_eq!(rendered.rows[0].role.as_ref().unwrap().text, "slider");
     }
     #[test]
     fn filters_keep_refs_and_report_cycles_and_missing() {
@@ -1441,7 +1305,7 @@ mod tests {
         struct Custom;
         impl PresentationAdapter for Custom {
             fn project(&self, node: &Node, depth: usize, limit: usize) -> CompactNode {
-                let mut row = compact(node, depth, limit);
+                let mut row = compact(&schema::MACOS_AX, node, depth, limit);
                 row.role = Some(preview("custom_entry", limit));
                 row.name = node
                     .attributes

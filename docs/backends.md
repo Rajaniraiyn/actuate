@@ -1,6 +1,6 @@
 # Backend implementation guide
 
-Implement capability traits individually. `Providers<O, S, P, T>` allows separate implementations for observation, semantic actions, pointer input, and text. A capability is unavailable until a provider implements it. Unimplemented capabilities return explicit errors or have no trait implementation; native providers never panic with `todo!()`.
+Implement capability traits individually. `Providers<O, S, P, T>` allows separate implementations for observation, semantic actions, pointer input, and text. A capability is unavailable until a provider implements it. Empty platform crates deliberately implement no traits and never panic with `todo!()`.
 
 Native handles remain provider-owned. Reference namespaces change when a provider restarts. Never reinterpret a foreign reference or resolve a stale reference through a similar label or position. Receipts distinguish dispatch from verified consumption. Failures after possible native mutation must report unknown effects, without automatic retry.
 
@@ -26,15 +26,23 @@ Next work:
 
 ## Windows
 
-The initial implementation and host test instructions are in [Windows validation](windows-validation.md). Native UIA handles stay on their creating thread; global input is separate from accessibility actions. No live Windows validation has been performed from this macOS host.
+The initial implementation and host test instructions are in [Windows validation](windows-validation.md). Native UIA handles stay on their creating thread; global input is separate from accessibility actions. The Windows crate and its Win32 overlay have cross-target type checks only; no live Windows validation has been performed.
 
 For a fully isolated provider, start UIA on an owned MTA worker. Respect handler registration and removal ownership. Add UIA, MSAA/IA2 and Java Access Bridge as separate routes. Match native GUI-thread input routing and `AttachThreadInput` resource effects to the architecture. A timed-out COM call is not cancelled merely because Rust stopped awaiting it.
 
 ## Linux
 
-The initial implementation separates AT-SPI observation from X11 capture/input. See [Linux validation](linux-validation.md) and the [desktop acceptance checklist](desktop-acceptance.md). An explicit Wayland RemoteDesktop portal provider supplies granted input through a persistent session; PipeWire capture is still pending. See [Wayland sessions](wayland.md).
+The `linux` crate implements AT-SPI2 observation and semantic actions over D-Bus, Wayland virtual-pointer and virtual-keyboard delivery, XTest delivery on X11 and Xwayland, screencopy and image-copy-capture frames, Hyprland window discovery and window-targeted shortcuts, and a layer-shell cursor renderer. `LinuxSession` composes them with the same request surface as `MacSession`. Every route is explicit; there is no switch from window-targeted or X-server-local delivery to the shared compositor seat. See [the Linux guide](linux.md).
 
-Keep AT-SPI observation separate from X11, portal/libei, compositor-specific and uinput delivery. Negotiate Wayland devices and coordinate regions. No implicit switch from session-scoped delivery to global input. Handle session revocation and device removal during gestures.
+Shared desktop primitives live in the `compositor` crate: Hyprland IPC over its socket and Lua dispatchers, plus Wayland registry, output geometry, seat keymap and shared-memory buffer helpers used by both the providers and the renderer.
+
+Next work:
+
+- Portal `RemoteDesktop`/libei delivery for compositors without the wlr virtual-device protocols.
+- A compositor plugin route for per-window pointer events that leave the user's cursor untouched, the Linux analogue of SkyLight.
+- AT-SPI event subscriptions for reference retirement and bounded handle retention.
+- X11 ARGB overlay rendering for native X sessions; the layer-shell renderer covers Wayland.
+- Hotplugged outputs and seat changes during a session.
 
 ## Android and iOS
 
@@ -71,8 +79,8 @@ overlay boundaries are described in [composition](composition.md).
 
 ## Desktop overlay implementations
 
-The shared `overlay` crate now builds a native helper for macOS, Windows and X11.
-Use `OverlayController` as the independent `CursorVisualization` provider.
-[Windows](windows-overlay.md) and [Linux](linux-overlay.md) document window scope,
-workspace checks, rendering limitations and native test cases. Native Wayland
-window attachment remains unsupported until a compositor-specific provider exists.
+The shared `overlay` crate builds one native helper: AppKit on macOS, a layered
+click-through window on Windows, a layer-shell surface on Wayland and an X11 Shape
+window on native X sessions. `OverlayController` is the independent
+`CursorVisualization` provider for all of them, and the Linux layer-shell renderer also
+runs in-process. See [Windows overlay](windows-overlay.md) and [Linux](linux.md#visual-cursor).

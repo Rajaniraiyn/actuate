@@ -1,52 +1,48 @@
-//! Shared command adapter. Native provider sessions own handles and operations.
+//! Windows host adapter. The native session owns handles and operations;
+//! this module only selects commands and presents replies.
 use super::*;
 use serde_json::json;
-
-#[cfg(target_os = "linux")]
-use linux::LinuxSession as NativeSession;
-#[cfg(target_os = "windows")]
-use windows::WindowsSession as NativeSession;
+use windows::WindowsSession;
 
 pub(super) fn run_host(
     command: Command,
     connection: Connection,
     format: unimation::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let host_provider = match connection.provider {
-        Provider::Native => true,
-        #[cfg(target_os = "windows")]
-        Provider::Windows => true,
-        #[cfg(target_os = "linux")]
-        Provider::Linux => true,
-        #[cfg(any(feature = "android", feature = "idevice"))]
-        _ => false,
-    };
-    if !host_provider {
-        return Err("Selected provider is not the native desktop provider".into());
+    if !matches!(connection.provider, Provider::Native | Provider::Windows) {
+        return Err("Selected provider is not the Windows host".into());
     }
-    if connection.device.is_some()
-        || connection.device_set.is_some()
-        || connection.credentials.is_some()
-        || connection.trust_first_connection
-    {
+    if connection.device.is_some() || connection.device_set.is_some() {
         return Err(
-            "Device and pairing options do not apply to the native desktop provider".into(),
+            "--device and --device-set select mobile providers; the Windows host takes neither"
+                .into(),
         );
     }
-    let mut session = NativeSession::new()?;
+    let mut session = WindowsSession::new()?;
     match command {
-        Command::Session {} => serve_session(format, |request| session.dispatch(request)),
+        Command::Session {} => {
+            unimation::transport::serve(
+                std::io::stdin().lock(),
+                std::io::stdout().lock(),
+                format,
+                |request| {
+                    session
+                        .dispatch(request)
+                        .map(unimation::transport::ValueReply::from)
+                },
+            )?;
+            Ok(())
+        }
         Command::Discover { scope } => {
             let raw = session.dispatch(json!({"op":"discover"}))?;
             let scope = match scope {
                 DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
                 DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
             };
-            emit_value(
+            emit_pretty(
                 &unimation::discovery::present_discovery(&raw, scope, format),
                 format,
-            )?;
-            Ok(())
+            )
         }
         Command::Observe {
             pid,
@@ -58,9 +54,7 @@ pub(super) fn run_host(
             scope,
         } => {
             if scope != SnapshotScope::Application {
-                return Err(
-                    "Native baseline currently supports application snapshot scope only".into(),
-                );
+                return Err("The Windows provider supports application snapshot scope only".into());
             }
             let pid = match pid {
                 Some(pid) => pid,
@@ -89,18 +83,11 @@ pub(super) fn run_host(
             backend,
             max_pixel_edge,
         } => {
-            if display.is_some()
-                || window.is_some()
-                || backend != CaptureRoute::Native
-                || max_pixel_edge.is_some()
-            {
-                return Err("Native baseline capture supports the desktop at native resolution; alternate selections and resizing are unavailable".into());
-            }
-            emit_value(
+            require_plain_capture(display, window, backend, max_pixel_edge, "Windows")?;
+            emit_pretty(
                 &session.dispatch(json!({"op":"capture","path":path}))?,
                 format,
-            )?;
-            Ok(())
+            )
         }
         Command::Displays | Command::Windows | Command::Capabilities => {
             let op = match command {
@@ -108,9 +95,8 @@ pub(super) fn run_host(
                 Command::Windows => "windows",
                 _ => "capabilities",
             };
-            emit_value(&session.dispatch(json!({"op":op}))?, format)?;
-            Ok(())
+            emit_pretty(&session.dispatch(json!({"op":op}))?, format)
         }
-        _ => Err("This command is unavailable for the selected native desktop provider".into()),
+        _ => Err("This command is unavailable for the Windows provider".into()),
     }
 }

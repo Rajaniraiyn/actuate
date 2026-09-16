@@ -56,6 +56,14 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                 serde_json::to_string(record[key].as_str().unwrap_or("?"))
                     .expect("string serialization")
             };
+            // Optional platform fields are omitted, never shown as "?".
+            let optional = |key: &str| {
+                record
+                    .get(key)
+                    .filter(|v| !v.is_null())
+                    .map(|_| format!(" [{}]", clean(key)))
+                    .unwrap_or_default()
+            };
             let marker = if record["active"] == true { "*" } else { " " };
             let windows = record["visible_window_ids"]
                 .as_array()
@@ -98,14 +106,11 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                 String::new()
             };
             text.push_str(&format!(
-                "{marker} {} {}{}{} windows={windows}{spaces}{}{}\n",
+                "{marker} {} {}{}{}{} windows={windows}{spaces}{}{}\n",
                 record["pid"],
                 clean("name"),
-                record
-                    .get("bundle_id")
-                    .filter(|v| !v.is_null())
-                    .map(|_| format!(" [{}]", clean("bundle_id")))
-                    .unwrap_or_default(),
+                optional("bundle_id"),
+                optional("toolkit"),
                 record
                     .get("activation_policy")
                     .filter(|v| !v.is_null())
@@ -179,13 +184,14 @@ mod tests {
     use super::*;
     #[test]
     fn native_desktop_does_not_invent_apple_fields() {
-        let raw = json!({"applications":[{"pid":42,"name":"Editor","windows":[{"window_id":7}],"visible_window_ids":[7]}]});
+        let raw = json!({"applications":[{"pid":42,"name":"Editor","toolkit":"GTK","windows":[{"window_id":7}],"visible_window_ids":[7]}]});
         let text = present_discovery(&raw, DiscoveryScope::All, OutputFormat::Text);
         let text = text.as_str().unwrap();
         assert!(text.contains("accessibility=unknown"));
         assert!(text.contains("windows=1"));
+        assert!(text.contains("[\"GTK\"]"));
         assert!(!text.contains("spaces="));
-        assert!(!text.contains("[\"?\"]"));
+        assert!(!text.contains("\"?\""));
         assert_eq!(
             present_discovery(&raw, DiscoveryScope::All, OutputFormat::Json),
             raw
