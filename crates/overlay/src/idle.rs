@@ -1,6 +1,6 @@
 //! Decorative offsets only. Never feed these values into input coordinates.
-use crate::motion::MotionStyle;
 use serde::{Deserialize, Serialize};
+use unimation::motion::MotionStyle;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -8,6 +8,7 @@ pub enum IdleStyle {
     Off,
     #[default]
     Bob,
+    Wave,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -48,7 +49,12 @@ impl IdleAppearance {
         let fade = fade * fade * (3. - 2. * fade);
         let phase = std::f64::consts::TAU * (elapsed % (self.period_ms as f64 / 1000.))
             / (self.period_ms as f64 / 1000.);
-        (0., self.amplitude * fade * phase.sin())
+        let horizontal = if self.style == IdleStyle::Wave {
+            self.amplitude * 0.5 * fade * (phase * 0.5).sin()
+        } else {
+            0.
+        };
+        (horizontal, self.amplitude * fade * phase.sin())
     }
 }
 #[cfg(test)]
@@ -98,5 +104,24 @@ mod tests {
             }
             .is_valid()
         );
+    }
+
+    #[test]
+    fn wave_is_bounded_continuous_and_disabled_by_reduced_motion() {
+        let idle = IdleAppearance {
+            style: IdleStyle::Wave,
+            ..Default::default()
+        };
+        let mut previous = (0.0, 0.0);
+        for tick in 0..2400 {
+            let time = tick as f64 / 120.0;
+            let point = idle.offset(time, MotionStyle::Curved);
+            assert!(point.0.abs() <= idle.amplitude * 0.5);
+            assert!(point.1.abs() <= idle.amplitude);
+            assert!((point.0 - previous.0).abs() < 0.02);
+            assert!((point.1 - previous.1).abs() < 0.03);
+            assert_eq!(idle.offset(time, MotionStyle::Reduced), (0.0, 0.0));
+            previous = point;
+        }
     }
 }

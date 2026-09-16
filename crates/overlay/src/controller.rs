@@ -10,19 +10,26 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use unimation::{Effect, Result};
+use unimation::Result;
 
 pub struct OverlayController {
+    physical_cursor: crate::PhysicalCursorPolicy,
+    tracking: crate::CursorTracking,
     child: Option<Child>,
     sender: Option<SyncSender<Vec<u8>>>,
     writer: Option<JoinHandle<()>>,
 }
+/// Process and configuration state, not proof of a presented frame.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct OverlayState {
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub physical_cursor_policy: crate::PhysicalCursorPolicy,
+    pub tracking: crate::CursorTracking,
+    pub presentation_acknowledged: bool,
+}
 fn failure(message: impl ToString) -> unimation::NativeError {
-    unimation::NativeError {
-        code: "overlay_failed".into(),
-        message: message.to_string(),
-        effect: Effect::None,
-    }
+    unimation::NativeError::new("overlay_failed", message)
 }
 fn serialize(command: Value) -> Result<Vec<u8>> {
     let typed: CursorCommand = serde_json::from_value(command.clone()).map_err(failure)?;
@@ -45,13 +52,54 @@ impl OverlayController {
     /// `path` must explicitly name an executable. No PATH search or shell is used.
     /// Returns after spawning, before any acknowledgement from the visual helper.
     pub fn start(path: impl AsRef<Path>) -> Result<Self> {
+        Self::start_with_policy(path, crate::PhysicalCursorPolicy::Preserve)
+    }
+    pub fn physical_cursor_policy(&self) -> crate::PhysicalCursorPolicy {
+        self.physical_cursor
+    }
+    pub fn start_with_policy(
+        path: impl AsRef<Path>,
+        policy: crate::PhysicalCursorPolicy,
+    ) -> Result<Self> {
+        Self::start_with_options(path, policy, crate::CursorTracking::Commands)
+    }
+    pub fn start_with_options(
+        path: impl AsRef<Path>,
+        policy: crate::PhysicalCursorPolicy,
+        tracking: crate::CursorTracking,
+    ) -> Result<Self> {
+        #[cfg(not(windows))]
+        if policy != crate::PhysicalCursorPolicy::Preserve
+            || tracking != crate::CursorTracking::Commands
+        {
+            return Err(failure(
+                "Physical cursor hiding and tracking are not implemented by this platform renderer",
+            ));
+        }
         let path = std::fs::canonicalize(path).map_err(failure)?;
-        let mut child = Command::new(path)
+        let mut command = Command::new(path);
+        if tracking == crate::CursorTracking::PhysicalPointer {
+            command.arg("--track-physical-pointer");
+        }
+        match policy {
+            crate::PhysicalCursorPolicy::Preserve => {}
+            crate::PhysicalCursorPolicy::HideWithinScope => {
+                command.arg("--hide-cursor-within-scope");
+            }
+            crate::PhysicalCursorPolicy::HideWhileVisible => {
+                command.arg("--hide-cursor-while-visible");
+            }
+        }
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(failure)?;
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW for the visual helper.
+        }
+        let mut child = command.spawn().map_err(failure)?;
         let Some(mut stdin) = child.stdin.take() else {
             let _ = child.kill();
             let _ = child.wait();
@@ -75,6 +123,8 @@ impl OverlayController {
             }
         };
         Ok(Self {
+            physical_cursor: policy,
+            tracking,
             child: Some(child),
             sender: Some(sender),
             writer: Some(writer),
@@ -82,6 +132,16 @@ impl OverlayController {
     }
     pub fn scope(&mut self, scope: crate::CursorScope) -> Result<()> {
         self.send(json!({"op":"scope","scope":scope}))
+    }
+    pub fn state(&mut self) -> Result<OverlayState> {
+        let running = self.is_running()?;
+        Ok(OverlayState {
+            running,
+            pid: if running { self.pid() } else { None },
+            physical_cursor_policy: self.physical_cursor,
+            tracking: self.tracking,
+            presentation_acknowledged: false,
+        })
     }
     pub fn is_running(&mut self) -> Result<bool> {
         match self.child.as_mut() {

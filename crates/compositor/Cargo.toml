@@ -1,0 +1,17 @@
+[package]
+publish = false
+name = "compositor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+unimation.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+memmap2 = "0.9"
+rustix = { version = "1", features = ["fs"] }

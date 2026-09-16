@@ -1,3 +1,7 @@
+#[cfg(target_os = "windows")]
+mod desktop;
+#[cfg(target_os = "windows")]
+use desktop::run_host;
 use usage::{Cli, Subcommands, ValueEnum};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -5,6 +9,10 @@ enum Provider {
     Native,
     #[cfg(target_os = "macos")]
     Macos,
+    #[cfg(target_os = "linux")]
+    Linux,
+    #[cfg(target_os = "windows")]
+    Windows,
     #[cfg(target_os = "macos")]
     #[usage(name = "apple-simulator")]
     Ios,
@@ -38,6 +46,14 @@ enum DiscoveryScope {
 enum SnapshotScope {
     Application,
     Window,
+}
+impl From<SnapshotScope> for unimation::SnapshotScope {
+    fn from(value: SnapshotScope) -> Self {
+        match value {
+            SnapshotScope::Application => Self::Application,
+            SnapshotScope::Window => Self::FocusedWindow,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum CaptureRoute {
@@ -139,6 +155,7 @@ enum Command {
         limit: usize,
     },
     /// Capture the main display or an explicitly selected display/window.
+    /// On Linux, --display is an output index and --window a Hyprland window handle.
     Capture {
         path: std::path::PathBuf,
         #[usage(long)]
@@ -424,9 +441,7 @@ fn run(
                 return Ok(emit_value(&serde_json::to_value(devices)?, format)?);
             }
             Command::Capture {path, display, window, backend, max_pixel_edge} => {
-                if display.is_some() || window.is_some() || backend != CaptureRoute::Native || max_pixel_edge.is_some() {
-                    return Err("apple-device capture returns the device's encoded screenshot; display/window selection, resizing and alternate routes are unavailable".into());
-                }
+                require_plain_capture(display, window, backend, max_pixel_edge, "apple-device")?;
                 let udid = connection.device.ok_or("--provider apple-device capture requires --device UDID")?;
                 let mut provider = ios::physical::PhysicalCapture::from_env(std::time::Duration::from_secs(10))?;
                 let frame = provider.capture(udid)?.save(path)?;
@@ -437,13 +452,123 @@ fn run(
     }
     run_host(command, connection, format)
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn run_host(
     _: Command,
     _: Connection,
     _: unimation::OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     Err("No provider implemented for this OS yet".into())
+}
+#[cfg(target_os = "linux")]
+fn run_host(
+    command: Command,
+    connection: Connection,
+    format: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use linux::session::{CaptureSource, LinuxRequest, LinuxSession};
+    use unimation::ObserveRequest;
+    if connection.device.is_some() || connection.device_set.is_some() {
+        return Err(
+            "--device and --device-set select mobile providers; the Linux host takes neither"
+                .into(),
+        );
+    }
+    if matches!(command, Command::Session {}) {
+        return linux::session::serve(format);
+    }
+    let mut session = LinuxSession::connect()?;
+    let value = match command {
+        Command::Discover { scope } => {
+            let scope = match scope {
+                DiscoveryScope::All => unimation::discovery::DiscoveryScope::All,
+                DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
+            };
+            session.dispatch(serde_json::json!({"op":"discover","scope":scope,"format":format}))?
+        }
+        Command::Observe {
+            pid,
+            max_nodes,
+            max_depth,
+            interactive,
+            hide_hidden,
+            limit,
+            scope,
+        } => {
+            let pid = match pid {
+                Some(pid) => pid,
+                None => session
+                    .hyprland()
+                    .and_then(|h| h.active_window().ok().flatten())
+                    .map(|w| w.pid as i32)
+                    .ok_or("No active window is known; specify a PID")?,
+            };
+            session.extension(LinuxRequest::Snapshot {
+                request: ObserveRequest {
+                    pid,
+                    max_nodes,
+                    max_depth,
+                },
+                scope: scope.into(),
+                format,
+                options: unimation::presentation::PresentationOptions {
+                    actionable_only: interactive,
+                    hide_known_hidden: hide_hidden,
+                    max_nodes: limit,
+                    ..Default::default()
+                },
+            })?
+        }
+        Command::Capture {
+            path,
+            display,
+            window,
+            backend,
+            max_pixel_edge,
+        } => {
+            if backend != CaptureRoute::Native || max_pixel_edge.is_some() {
+                return Err("Linux capture uses the compositor protocols at native resolution; --backend executable and --max-pixel-edge are unavailable".into());
+            }
+            if display.is_some() && window.is_some() {
+                return Err("Choose either --display or --window".into());
+            }
+            let source = match (display, window) {
+                (_, Some(handle)) => CaptureSource::Window {
+                    address: format!("0x{handle:x}"),
+                },
+                (Some(index), None) => {
+                    let displays = session.extension(LinuxRequest::Displays {})?;
+                    let name = displays["outputs"][index as usize]["name"]
+                        .as_str()
+                        .ok_or("No output with that index; see displays")?
+                        .to_owned();
+                    CaptureSource::Output { name }
+                }
+                (None, None) => CaptureSource::FocusedOutput {},
+            };
+            session.extension(LinuxRequest::Capture { source, path })?
+        }
+        Command::Displays => session.extension(LinuxRequest::Displays {})?,
+        Command::Windows => session.extension(LinuxRequest::Windows {})?,
+        Command::Capabilities => session.extension(LinuxRequest::Capabilities {})?,
+        Command::Completions { .. }
+        | Command::Spec
+        | Command::Protocol
+        | Command::Diff { .. }
+        | Command::Query { .. }
+        | Command::View { .. }
+        | Command::Session {} => unreachable!(),
+        #[cfg(feature = "android")]
+        Command::Android { .. } => unreachable!(),
+        #[cfg(feature = "idevice")]
+        Command::Apple { .. } => {
+            return Err(
+                "apple devices list runs before host selection; other Apple commands need macOS"
+                    .into(),
+            );
+        }
+    };
+    emit_pretty(&value, format)
 }
 #[cfg(target_os = "macos")]
 fn run_host(
@@ -510,9 +635,7 @@ fn run_host(
                 }
             }
             Command::Capture {path,display,window,backend,max_pixel_edge} => {
-                if display.is_some() || window.is_some() || backend != CaptureRoute::Native || max_pixel_edge.is_some() {
-                    return Err("The iOS capture provider supports its primary display at native resolution; window/display selection, resizing and alternate capture routes are unavailable".into());
-                }
+                require_plain_capture(display, window, backend, max_pixel_edge, "apple-simulator")?;
                 ios::session::Request::Capture {path}
             }
             Command::Capabilities => ios::session::Request::Capabilities {},
@@ -542,14 +665,7 @@ fn run_host(
                 DiscoveryScope::Apps => unimation::discovery::DiscoveryScope::Apps,
             };
             let value = unimation::discovery::present_discovery(&ax.discover()?, scope, format);
-            if let Some(text) = value.as_str() {
-                print!("{text}");
-            } else if format == unimation::OutputFormat::Compact {
-                println!("{}", serde_json::to_string(&value)?);
-            } else {
-                println!("{}", serde_json::to_string_pretty(&value)?);
-            }
-            return Ok(());
+            return emit_pretty(&value, format);
         }
         Command::Observe {
             pid,
@@ -567,10 +683,7 @@ fn run_host(
                     .and_then(|pid| i32::try_from(pid).ok())
                     .ok_or("No foreground application is available; specify a PID")?,
             };
-            let scope = match scope {
-                SnapshotScope::Application => macos::session::SnapshotScope::Application,
-                SnapshotScope::Window => macos::session::SnapshotScope::FocusedWindow,
-            };
+            let scope = scope.into();
             let value = macos::session::MacSession::new().extension(
                 macos::session::MacRequest::Snapshot {
                     request: ObserveRequest {
@@ -588,14 +701,7 @@ fn run_host(
                     },
                 },
             )?;
-            if let Some(text) = value.as_str() {
-                print!("{text}");
-            } else if format == unimation::OutputFormat::Compact {
-                println!("{}", serde_json::to_string(&value)?);
-            } else {
-                println!("{}", serde_json::to_string_pretty(&value)?);
-            }
-            return Ok(());
+            return emit_pretty(&value, format);
         }
         Command::Capture {
             path,
@@ -648,61 +754,17 @@ fn run_host(
 }
 #[cfg(target_os = "macos")]
 fn session(format: unimation::OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
-    use serde_json::{Value, json};
-    use std::io::{BufRead, Write};
     let mut runtime = macos::session::MacSession::new();
-    for line in std::io::stdin().lock().lines() {
-        let line = line?;
-        let request = serde_json::from_str::<Value>(&line);
-        let id = request.as_ref().ok().and_then(|v| v.get("id")).cloned();
-        let result = match request {
-            Ok(r) => runtime.dispatch(r),
-            Err(e) => Err(unimation::NativeError {
-                code: "invalid_request".into(),
-                message: e.to_string(),
-                effect: unimation::Effect::None,
-            }),
-        };
-        let mut reply = match result {
-            Ok(v) => json!({"result":v}),
-            Err(e) => json!({"error":e}),
-        };
-        if let Some(id) = id {
-            reply["id"] = id;
-        }
-        if format == unimation::OutputFormat::Text {
-            println!(
-                "--- response id={} ---",
-                reply.get("id").unwrap_or(&Value::Null)
-            );
-            if let Some(result) = reply.get("result") {
-                if let Some(text) = result.as_str() {
-                    println!("{text}");
-                } else if let Ok(snapshot) =
-                    serde_json::from_value::<unimation::Snapshot>(result.clone())
-                {
-                    emit_snapshot(&snapshot, format, &Default::default())?;
-                } else {
-                    emit_value(result, format)?;
-                }
-            } else {
-                emit_value(&reply, format)?;
-            }
-            println!("--- end ---");
-        } else {
-            if format == unimation::OutputFormat::Compact
-                && let Some(result) = reply.get_mut("result")
-                && let Ok(snapshot) = serde_json::from_value::<unimation::Snapshot>(result.clone())
-            {
-                *result = serde_json::to_value(unimation::presentation::render_snapshot(
-                    &snapshot,
-                    &Default::default(),
-                )?)?;
-            }
-            println!("{}", serde_json::to_string(&reply)?);
-        }
-        std::io::stdout().flush()?;
-    }
+    unimation::transport::serve(
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+        format,
+        |request| {
+            runtime
+                .dispatch(request)
+                .map(unimation::transport::ValueReply::from)
+        },
+    )?;
     Ok(())
 }
 
@@ -710,15 +772,42 @@ fn parse_short_ref(
     session: &str,
     value: &str,
 ) -> Result<unimation::ElementRef, Box<dyn std::error::Error>> {
-    let id = value
-        .strip_prefix("@e")
-        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-        .ok_or("--root must be @e<number> from the saved snapshot")?
-        .parse::<u64>()?;
-    Ok(unimation::ElementRef {
-        session: session.into(),
-        id,
-    })
+    unimation::ElementRef::parse_short(session, value)
+        .map_err(|_| "--root must be @e<number> from the saved snapshot".into())
+}
+/// Rendered text prints verbatim; compact JSON stays on one line; full JSON is pretty.
+fn emit_pretty(
+    value: &serde_json::Value,
+    format: unimation::OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(text) = value.as_str() {
+        print!("{text}");
+    } else if format == unimation::OutputFormat::Compact {
+        println!("{}", serde_json::to_string(value)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(value)?);
+    }
+    Ok(())
+}
+/// Providers without display/window/route/resize selection reject those options.
+fn require_plain_capture(
+    display: Option<u32>,
+    window: Option<u32>,
+    backend: CaptureRoute,
+    max_pixel_edge: Option<u32>,
+    provider: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if display.is_some()
+        || window.is_some()
+        || backend != CaptureRoute::Native
+        || max_pixel_edge.is_some()
+    {
+        return Err(format!(
+            "{provider} capture uses its primary display at native resolution; display/window selection, resizing and alternate capture routes are unavailable"
+        )
+        .into());
+    }
+    Ok(())
 }
 fn emit_snapshot(
     snapshot: &unimation::Snapshot,
@@ -802,12 +891,8 @@ fn run_android(
         max_pixel_edge,
         ..
     } = &command
-        && (display.is_some()
-            || window.is_some()
-            || *backend != CaptureRoute::Native
-            || max_pixel_edge.is_some())
     {
-        return Err("Android capture uses the current display at native resolution; alternate capture options are unavailable".into());
+        require_plain_capture(*display, *window, *backend, *max_pixel_edge, "Android")?;
     }
     let credentials=connection.credentials.as_deref().ok_or("Android requires --credentials PATH: a pairing directory for wireless or a PEM key for usb:VID:PID")?;
     if let Command::Android { command } = command {
@@ -906,13 +991,7 @@ fn execute_android<D: android::CommandTransport>(
             backend,
             max_pixel_edge,
         } => {
-            if display.is_some()
-                || window.is_some()
-                || backend != CaptureRoute::Native
-                || max_pixel_edge.is_some()
-            {
-                return Err("Android capture uses the current display at native resolution; alternate capture options are unavailable".into());
-            }
+            require_plain_capture(display, window, backend, max_pixel_edge, "Android")?;
             Ok(emit_value(
                 &android::jsonl::capture_file(&mut device, &path)?,
                 format,

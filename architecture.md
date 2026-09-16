@@ -1,6 +1,6 @@
 # Unimation architecture
 
-Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, compact text and JSON presentation adapters, viewport hints, live actionability evidence, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. See [README](README.md), [backend tasks](docs/backends.md), [presentation and viewport behavior](docs/presentation.md), [SkyLight details](docs/skylight.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
+Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, compact text and JSON presentation adapters, viewport hints, live actionability evidence, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. Linux has AT-SPI2 observation and actions, Wayland and X11 input routes, compositor capture, Hyprland window discovery and a layer-shell cursor renderer; see [the Linux guide](docs/linux.md). See [README](README.md), [backend tasks](docs/backends.md), [presentation and viewport behavior](docs/presentation.md), [SkyLight details](docs/skylight.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
 
 Status: working design. Command names and Rust contracts below describe the target architecture unless identified as implemented in the linked implementation documentation. Research evidence alone does not establish runtime support.
 
@@ -1142,3 +1142,57 @@ Key-window preparation through `SLPSPostEventRecordTo` remains an experimental
 provider option, with explicit routing effects and separate tests for native
 controls and native drag-and-drop. Gesture workers must own serialization and
 release cleanup; worker placement alone cannot repair missing held-button state.
+
+### Windows and Linux first native providers
+
+The desktop CLI now selects the host backend through `native`, with platform-gated
+explicit provider names. The shared command adapter handles presentation only;
+native crates own sessions, typed request validation, handles and delivery. Both
+reuse core observation, semantic, pointer and keyboard contracts rather than
+introducing platform-specific top-level automation commands.
+
+Windows separates thread-affine UI Automation from Win32 global input and desktop
+geometry/capture. UIA runs on an MTA thread without windows; library callers must
+respect that ownership. COM calls are synchronous, and timeout/isolation remains
+separate work. Global input uses physical desktop pixels, including negative
+origins, with no implicit target activation or semantic-to-global fallback.
+
+Linux separates AT-SPI2 observation over the accessibility bus from compositor
+routes: Wayland virtual-pointer/keyboard delivery, XTest on X11 and Xwayland,
+screencopy and image-copy-capture frames, Hyprland window discovery and window-targeted
+shortcuts, and a layer-shell cursor renderer. Toolkits on Wayland report window-relative
+extents, so global bounds are derived from compositor window frames, with Xwayland
+extents scaled by the monitor scale. See [the Linux guide](docs/linux.md); the earlier
+portal RemoteDesktop provider was not carried forward and remains a route for
+compositors without the wlr virtual-device protocols.
+
+Native key codes and wheel detents remain provider-specific. Unsupported portable
+pixel scrolling must fail before dispatch rather than silently become wheel ticks.
+Snapshot projections understand native role/name/state fields while preserving
+all raw provider fields and unknown visibility. Native tree completeness and
+application acceptance remain separate from successful transport calls.
+
+The Windows provider has compile validation only. The Linux provider was validated live
+on Hyprland with a GTK 4 fixture; see [validation](docs/validation.md#linux-2026-09-16).
+Follow the [acceptance checklist](docs/desktop-acceptance.md) on other hosts, saving
+capabilities, requests, replies and before/after evidence.
+
+Windows framework and Linux display-server differences are mapped in
+[desktop provider routes](docs/desktop-provider-routes.md). Alternate providers must
+describe their actual routes, coordinate domains and supported operations. Ordinary
+Rust composition is implemented; dynamic plugin loading and universal runtime route
+planning remain future work.
+
+
+### Desktop overlays
+
+`OverlayController` is a portable `CursorVisualization` provider. Its helper has
+Windows layered-window, Wayland layer-shell and X11 Shape renderers alongside AppKit,
+and the layer-shell renderer also runs in-process. The shared protocol carries explicit
+desktop or window scope. Rendering consumes the shared cursor outline, motion and idle
+configuration; it never injects input. Each native renderer owns window ordering,
+clipping and workspace checks. Windows and X11 scope use polling, so they cannot promise
+atomic attachment during compositor transitions; layer-shell surfaces are never occluded.
+
+See [composition](docs/composition.md), [Linux](docs/linux.md) and
+[Windows overlay](docs/windows-overlay.md).

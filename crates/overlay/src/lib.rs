@@ -1,11 +1,29 @@
 use serde::{Deserialize, Serialize};
-use unimation::{Effect, NativeError, Result};
+use unimation::{NativeError, Result, motion::MotionStyle};
 
 mod controller;
 pub mod idle;
-pub mod motion;
+pub mod ripple;
 pub mod shape;
-pub use controller::OverlayController;
+pub use controller::{OverlayController, OverlayState};
+/// Physical-pointer visibility is an explicit effect, separate from decoration.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalCursorPolicy {
+    #[default]
+    Preserve,
+    HideWithinScope,
+    HideWhileVisible,
+}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorTracking {
+    #[default]
+    Commands,
+    PhysicalPointer,
+}
+#[cfg(target_os = "linux")]
+pub mod linux;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CursorCommand {
@@ -47,7 +65,7 @@ pub enum CursorScope {
 pub struct CursorAppearance {
     pub scale: f64,
     pub color: [f64; 3],
-    pub motion: motion::MotionStyle,
+    pub motion: MotionStyle,
     pub idle: idle::IdleAppearance,
 }
 impl Default for CursorAppearance {
@@ -89,11 +107,10 @@ impl CursorCommand {
             _ => false,
         };
         if invalid {
-            Err(NativeError {
-                code: "invalid_cursor_command".into(),
-                message: "Coordinates must be finite, duration_ms <= 10000, scale 0.5..=3, and RGB components 0..=1, idle amplitude 0..=2 and period_ms 800..=10000".into(),
-                effect: Effect::None,
-            })
+            Err(NativeError::new(
+                "invalid_cursor_command",
+                "Coordinates must be finite, duration_ms <= 10000, scale 0.5..=3, and RGB components 0..=1, idle amplitude 0..=2 and period_ms 800..=10000",
+            ))
         } else {
             Ok(())
         }
@@ -120,25 +137,22 @@ macro_rules! unavailable_renderer {
                 type Status = super::CursorAcknowledgement;
                 fn visualize(&mut self, command: Self::Command) -> unimation::Result<Self::Status> {
                     command.validate()?;
-                    Err(unimation::NativeError {
-                        code: "cursor_renderer_unavailable".into(),
-                        message: concat!($platform, " cursor renderer is not implemented").into(),
-                        effect: unimation::Effect::None,
-                    })
+                    Err(unimation::NativeError::new(
+                        "cursor_renderer_unavailable",
+                        concat!($platform, " cursor renderer is not implemented"),
+                    ))
                 }
             }
         }
     };
 }
-unavailable_renderer!(linux, "Linux");
-unavailable_renderer!(windows, "Windows");
 unavailable_renderer!(ios, "iOS/iPadOS");
 unavailable_renderer!(android, "Android");
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use unimation::CursorVisualization;
+    use unimation::{CursorVisualization, Effect};
     #[test]
     fn command_roundtrip_and_validation() {
         let command: CursorCommand =
@@ -234,7 +248,7 @@ mod tests {
     }
     #[test]
     fn unavailable_renderer_does_not_acknowledge_a_frame() {
-        let error = linux::UnavailableRenderer
+        let error = ios::UnavailableRenderer
             .visualize(CursorCommand::Show)
             .unwrap_err();
         assert_eq!(error.code, "cursor_renderer_unavailable");

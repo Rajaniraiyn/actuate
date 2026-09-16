@@ -1,5 +1,5 @@
 //! Diffs describe observations, never native element destruction.
-use crate::{Effect, ElementRef, NativeError, Node, Result, Snapshot};
+use crate::{ElementRef, NativeError, Node, Result, Snapshot, schema::NativeSchema, values};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,11 +59,7 @@ pub struct SnapshotDiff {
     pub modified: Vec<ModifiedNode>,
 }
 fn invalid(message: &str) -> NativeError {
-    NativeError {
-        code: "incompatible_snapshots".into(),
-        message: message.into(),
-        effect: Effect::None,
-    }
+    NativeError::new("incompatible_snapshots", message)
 }
 fn index(snapshot: &Snapshot) -> Result<BTreeMap<u64, &Node>> {
     let mut result = BTreeMap::new();
@@ -92,18 +88,6 @@ fn index(snapshot: &Snapshot) -> Result<BTreeMap<u64, &Node>> {
     }
     Ok(result)
 }
-fn uncertain(value: &Value) -> bool {
-    match value {
-        Value::Object(o) => {
-            matches!(
-                o.get("type").and_then(Value::as_str),
-                Some("opaque" | "read_error" | "ax_error")
-            ) || o.values().any(uncertain)
-        }
-        Value::Array(a) => a.iter().any(uncertain),
-        _ => false,
-    }
-}
 fn field(
     fields: &mut Vec<FieldChange>,
     path: String,
@@ -115,8 +99,8 @@ fn field(
         return;
     }
     let evidence = if enumeration_uncertain
-        || before.as_ref().is_none_or(uncertain)
-        || after.as_ref().is_none_or(uncertain)
+        || before.as_ref().is_none_or(values::is_uncertain)
+        || after.as_ref().is_none_or(values::is_uncertain)
     {
         ChangeEvidence::Uncertain
     } else {
@@ -143,6 +127,7 @@ pub fn diff_snapshots(before: &Snapshot, after: &Snapshot) -> Result<SnapshotDif
     }
     let old = index(before)?;
     let new = index(after)?;
+    let children_attribute = NativeSchema::detect(before).children;
     let mut result = SnapshotDiff {
         root: before.root.clone(),
         before_revision: before.revision,
@@ -206,9 +191,13 @@ pub fn diff_snapshots(before: &Snapshot, after: &Snapshot) -> Result<SnapshotDif
                 Some(b),
                 enumeration_uncertain
                     || (name == "children"
-                        && [previous, node]
-                            .iter()
-                            .any(|n| n.attributes.get("AXChildren").is_some_and(uncertain))),
+                        && children_attribute.is_some_and(|attribute| {
+                            [previous, node].iter().any(|n| {
+                                n.attributes
+                                    .get(attribute)
+                                    .is_some_and(values::is_uncertain)
+                            })
+                        })),
             );
         }
         if !fields.is_empty() {

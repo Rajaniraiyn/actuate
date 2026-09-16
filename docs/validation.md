@@ -168,3 +168,107 @@ test passing, plus three native/permission-dependent tests ignored. All-feature 
 and strict Clippy passed. The standalone iOS binary also passed live streamed-snapshot,
 explicit-null request ID and malformed-request recovery checks. The disposable iPad
 was shut down and deleted; its data directory and test captures were removed.
+
+## Linux, 2026-09-16
+
+Checked on this Arch host running Hyprland 0.56.2 (Wayland, one 1920x1200 output at scale
+1.25), Xwayland 24.1 without the EI portal, AT-SPI2 2.60 and GTK 4.22. These are
+observations on those versions, not universal compatibility claims. The user kept working
+on other workspaces; every live check ran against disposable fixtures on a separate
+workspace, and compositor-seat input was dispatched only while that workspace was active.
+
+### Working end-to-end paths
+
+- Discovery: the accessibility bus listed five registered applications; Hyprland clients
+  were merged by pid, and mapped windows without an accessible application were reported
+  separately. Chromium-based windows were absent because the bus `IsEnabled` flag was off.
+- Observation: a 65-node Ghostty tree read in about 0.9 s with complete traversal. The
+  GTK 4 fixture exposed frame, button, entry, check button, slider, list, rows and text
+  view with canonical roles, toolkit role names, states, interfaces and actions.
+- Geometry: GTK 4 reports window-relative extents for both coordinate types on Wayland.
+  Adding the Hyprland client origin produced frame bounds equal to the compositor's window
+  position. Xwayland extents are in X pixels, 1.25 times the logical size on this output,
+  and are divided by the monitor scale before use.
+- Semantic actions: `Click` on the button incremented the fixture counter twice, a
+  misspelled action returned `unsupported` with no effect, `set_string` on the entry wrote
+  `Hi🦀` and `attribute Text.Text` read it back, `set_float` moved the slider and
+  `wait_attribute` on `Value.CurrentValue` matched, and `observe_subtree` reflected the
+  toggled check button.
+- Retained observations: `query` by role and name found the button, `diff` listed the
+  changed check button and slider, `diff_view` reported the status label change, and the
+  interactive text view listed the button.
+- Window-targeted keys: GTK 4.22 check buttons advertise no action and reject
+  `Component.GrabFocus` as unsupported. Shift+Tab sent through `hyprland_shortcut` walked
+  the fixture's focus chain (the fixture logs focus changes), Space toggled the check
+  button, and a letter reached the entry, all while `hyprctl activewindow` stayed on the
+  terminal.
+- Capture: unoccluded toplevel capture through ext-image-copy-capture, output capture
+  through wlr-screencopy and a region crop all produced PNG frames with geometry mappings;
+  an image click with semantic mode returned `unsupported`.
+- Visual cursor: the in-process layer-shell renderer and the `unimation-overlay` helper
+  both registered an overlay layer surface named `unimation-cursor` that `hyprctl layers`
+  listed, and removed it on stop. A `grim` capture of the screen region around a helper
+  `move`/`show`/`click` at 1151,551 showed the purple glyph with its white outline and the
+  click ring at that point; `hyprctl layers` placed the surface at 1119,519 with the
+  96-point box, so the hotspot matched the requested coordinate. During the suite the
+  window-scoped glyph followed the semantic click to the button's center while the
+  fixture workspace was shown and was parked off-screen while another workspace was
+  active. No input events were injected by the overlay.
+- Compositor seat pointer: with the fixture workspace active, a virtual-pointer move
+  landed at the requested logical point exactly (`hyprctl cursorpos` matched to the pixel)
+  and a subsequent click focused and incremented the button.
+- Guard: with another workspace active, a reference-targeted global click returned
+  `not_on_active_workspace` with no effect and the shared cursor did not move.
+- Xwayland: with the X11 route selected, an XTest click through a fixture running under
+  `GDK_BACKEND=x11` incremented its counter while `hyprctl cursorpos` stayed exactly where
+  it was, and `GetImage` captured the X window drawable. A synthetic `send_event` click
+  returned a delivery receipt without a fixture reaction, as documented.
+
+The final suite after the cleanup pass: 63 core, 11 Linux, 9 overlay, 3 compositor,
+9 iOS and 28 Android unit tests passed; Clippy with warnings denied and the Apple crates'
+`aarch64-apple-darwin` type-check passed from Linux. `tests/linux_e2e.py` passed every
+section on a run with the fixture workspace active, including the compositor-seat pointer
+click that moved the shared cursor onto the button and incremented the counter.
+
+### Real applications, 2026-09-16
+
+`tests/linux_apps_demo.py` drove two installed applications through one long-lived
+`UNIMATION_SOFT_CURSOR=1 unimation session --json` on the fixture workspace while the
+user worked on another workspace with the keyboard and mouse; nothing touched the seat.
+
+- Calculator: `omacalc` (Qt Quick under Xwayland) registers an accessible application
+  but exposes no children even with `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`, so it was
+  driven by `click_image` on `x11_window` captures over the X11 route. Eight XTest
+  clicks (`AC 2 + 3 =`, then `* 8 =`) produced `5` and `40` in window captures, each
+  click recaptured first because a dispatched click advances the epoch, while
+  `hyprctl cursorpos` never moved. An X window capture now resolves its Hyprland client
+  so the soft cursor is window-scoped and the workspace guard still applies.
+- Terminal: a Ghostty window titled `UnimationTerminal` exposes a frame and panels but
+  no text node. `echo unimation-ok` plus Return sent as `hyprland_shortcut` keys to the
+  frame printed the command and its output in a toplevel capture, and
+  `hyprctl activewindow` stayed on the user's browser on another workspace throughout.
+- Soft cursor: an output capture showed the glyph on the calculator's `=` key after the
+  last click; while the user's workspace was active `hyprctl layers` reported the surface
+  parked at -96,-96, and the user moved the floating calculator during the run without
+  the glyph detaching. `capture` refuses to overwrite an existing path.
+- The idle session with the cursor shown used about 1.5% of one core.
+
+### Known limits
+
+- Hyprland exposes one seat and no `ext-transient-seat`; the virtual pointer moves the
+  user's cursor. Non-stealing routes are AT-SPI actions, Hyprland shortcuts and XTest
+  inside Xwayland.
+- A button press queued in the same flush as the motion that moved the pointer onto a
+  GTK 4 button was not delivered on one run; the Wayland route now waits 40 ms after
+  motion before pressing.
+- `hit_test` and window-targeted clicks depend on Hyprland window records; other
+  compositors get window-relative bounds only.
+- Layer surfaces cannot join the window stack, so window scope emulates the macOS
+  attachment: `compositor::hyprland::stacking_above` derives the windows above the
+  target from Hyprland's tiers (tiled, maximized, floating, pinned, fullscreen) and
+  client order and the renderer cuts the glyph away under them, and the Hyprland event
+  socket triggers geometry refreshes. Unit tests cover the tiering and the cut; the
+  covered-glyph case was not observed live because it needs the fixture workspace shown.
+  Layer-shell surfaces of other clients (bars, launchers) are not modelled.
+- Only one output and one scale were tested live; mixed-scale layouts rely on the
+  per-monitor conversion without live evidence.

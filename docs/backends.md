@@ -26,11 +26,23 @@ Next work:
 
 ## Windows
 
-Start UIA on an owned MTA worker. Respect handler registration and removal ownership. Add UIA, MSAA/IA2 and Java Access Bridge as separate routes. Match native GUI-thread input routing and `AttachThreadInput` resource effects to the architecture. A timed-out COM call is not cancelled merely because Rust stopped awaiting it.
+The initial implementation and host test instructions are in [Windows validation](windows-validation.md). Native UIA handles stay on their creating thread; global input is separate from accessibility actions. The [Windows host results](windows-host-results.md) cover isolated WPF, WinForms, Win32 and Electron fixtures. [Interactive results](windows-interactive-results.md) cover shell controls, visible overlays and Explorer transfers. Semantic UIA actions can activate targets; background focus safety and full shell coverage remain incomplete.
+
+For a fully isolated provider, start UIA on an owned MTA worker. Respect handler registration and removal ownership. Add UIA, MSAA/IA2 and Java Access Bridge as separate routes. Match native GUI-thread input routing and `AttachThreadInput` resource effects to the architecture. A timed-out COM call is not cancelled merely because Rust stopped awaiting it.
 
 ## Linux
 
-Keep AT-SPI observation separate from X11, portal/libei, compositor-specific and uinput delivery. Negotiate Wayland devices and coordinate regions. No implicit switch from session-scoped delivery to global input. Handle session revocation and device removal during gestures.
+The `linux` crate implements AT-SPI2 observation and semantic actions over D-Bus, Wayland virtual-pointer and virtual-keyboard delivery, XTest delivery on X11 and Xwayland, screencopy and image-copy-capture frames, Hyprland window discovery and window-targeted shortcuts, and a layer-shell cursor renderer. `LinuxSession` composes them with the same request surface as `MacSession`. Every route is explicit; there is no switch from window-targeted or X-server-local delivery to the shared compositor seat. See [the Linux guide](linux.md).
+
+Shared desktop primitives live in the `compositor` crate: Hyprland IPC over its socket and Lua dispatchers, plus Wayland registry, output geometry, seat keymap and shared-memory buffer helpers used by both the providers and the renderer.
+
+Next work:
+
+- Portal `RemoteDesktop`/libei delivery for compositors without the wlr virtual-device protocols.
+- A compositor plugin route for per-window pointer events that leave the user's cursor untouched, the Linux analogue of SkyLight.
+- AT-SPI event subscriptions for reference retirement and bounded handle retention.
+- X11 ARGB overlay rendering for native X sessions; the layer-shell renderer covers Wayland.
+- Hotplugged outputs and seat changes during a session.
 
 ## Android and iOS
 
@@ -63,3 +75,12 @@ See [iOS session usage and validation](ios.md).
 The iOS crate now also owns typed sessions and the JSONL adapter. Independent HID
 providers implement touch, hardware controls and keyboard input. Shared provider and
 overlay boundaries are described in [composition](composition.md).
+
+
+## Desktop overlay implementations
+
+The shared `overlay` crate builds one native helper: AppKit on macOS, a layered
+click-through window on Windows, a layer-shell surface on Wayland and an X11 Shape
+window on native X sessions. `OverlayController` is the independent
+`CursorVisualization` provider for all of them, and the Linux layer-shell renderer also
+runs in-process. See [Windows overlay](windows-overlay.md) and [Linux](linux.md#visual-cursor).

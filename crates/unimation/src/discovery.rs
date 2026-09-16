@@ -15,7 +15,8 @@ pub enum DiscoveryScope {
 /// Classification relies on native adapter evidence. Unknown classifications
 /// remain discoverable with All; filtering never affects handle validity.
 pub fn is_app(record: &Value) -> bool {
-    record["activation_policy"] == "regular"
+    record["application"] == true
+        || record["activation_policy"] == "regular"
         || record["system_ui"] == true
         || record["visible_window_ids"]
             .as_array()
@@ -46,12 +47,22 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
         let mut text = format!(
             "Applications: {} shown, {omitted} omitted; accessibility={}\n",
             selected.len(),
-            raw["accessibility_trusted"]
+            raw.get("accessibility_trusted")
+                .map(Value::to_string)
+                .unwrap_or_else(|| "unknown".into())
         );
         for record in &selected {
             let clean = |key: &str| {
                 serde_json::to_string(record[key].as_str().unwrap_or("?"))
                     .expect("string serialization")
+            };
+            // Optional platform fields are omitted, never shown as "?".
+            let optional = |key: &str| {
+                record
+                    .get(key)
+                    .filter(|v| !v.is_null())
+                    .map(|_| format!(" [{}]", clean(key)))
+                    .unwrap_or_default()
             };
             let marker = if record["active"] == true { "*" } else { " " };
             let windows = record["visible_window_ids"]
@@ -76,7 +87,7 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                     }
                 }
             }
-            let spaces = if record.get("windows").is_some() {
+            let spaces = if raw.get("space_topology").is_some() {
                 format!(
                     " spaces={}",
                     if space_ids.is_empty() {
@@ -95,11 +106,16 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                 String::new()
             };
             text.push_str(&format!(
-                "{marker} {} {} [{}] {} windows={windows}{spaces}{}{}\n",
+                "{marker} {} {}{}{}{} windows={windows}{spaces}{}{}\n",
                 record["pid"],
                 clean("name"),
-                clean("bundle_id"),
-                clean("activation_policy"),
+                optional("bundle_id"),
+                optional("toolkit"),
+                record
+                    .get("activation_policy")
+                    .filter(|v| !v.is_null())
+                    .map(|_| format!(" {}", clean("activation_policy")))
+                    .unwrap_or_default(),
                 if record["system_ui"] == true {
                     " system-ui"
                 } else {
@@ -114,7 +130,7 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
         }
         if !errors.is_empty() {
             text.push_str(&format!(
-                "AX state errors across all records: {}\n",
+                "Accessibility state errors across all records: {}\n",
                 errors
                     .iter()
                     .map(|(code, count)| format!("{code}={count}"))
@@ -138,6 +154,7 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
                 let mut projected = serde_json::Map::new();
                 for key in [
                     "pid",
+                    "application",
                     "name",
                     "bundle_id",
                     "active",
@@ -165,6 +182,21 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_desktop_does_not_invent_apple_fields() {
+        let raw = json!({"applications":[{"pid":42,"name":"Editor","toolkit":"GTK","windows":[{"window_id":7}],"visible_window_ids":[7]}]});
+        let text = present_discovery(&raw, DiscoveryScope::All, OutputFormat::Text);
+        let text = text.as_str().unwrap();
+        assert!(text.contains("accessibility=unknown"));
+        assert!(text.contains("windows=1"));
+        assert!(text.contains("[\"GTK\"]"));
+        assert!(!text.contains("spaces="));
+        assert!(!text.contains("\"?\""));
+        assert_eq!(
+            present_discovery(&raw, DiscoveryScope::All, OutputFormat::Json),
+            raw
+        );
+    }
     #[test]
     fn projection_preserves_default_and_retains_native_evidence() {
         let raw = json!({"accessibility_trusted":true,"applications":[

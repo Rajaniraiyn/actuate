@@ -67,11 +67,7 @@ pub struct SimulatorFrame {
     pub click_mapping: Option<()>,
 }
 fn failed(message: impl Into<String>) -> NativeError {
-    NativeError {
-        code: "capture_failed".into(),
-        message: message.into(),
-        effect: Effect::None,
-    }
+    NativeError::new("capture_failed", message.into())
 }
 impl Capture for SimulatorServices {
     type Request = PathBuf;
@@ -82,17 +78,16 @@ impl Capture for SimulatorServices {
             return Err(failed("Output path already exists"));
         }
         self.simctl.screenshot(&self.udid, &path)?;
-        let mut header = [0u8; 24];
+        let mut header = [0u8; 33];
         std::fs::File::open(&path)
             .and_then(|mut file| file.read_exact(&mut header))
             .map_err(|e| failed(e.to_string()))?;
-        if &header[..8] != b"\x89PNG\r\n\x1a\n" || &header[12..16] != b"IHDR" {
-            return Err(failed("Native screenshot did not return a PNG header"));
-        }
+        let (pixel_width, pixel_height) = unimation::image::png_dimensions(&header)
+            .map_err(|_| failed("Native screenshot did not return a PNG header"))?;
         Ok(SimulatorFrame {
             path,
-            pixel_width: u32::from_be_bytes(header[16..20].try_into().unwrap()),
-            pixel_height: u32::from_be_bytes(header[20..24].try_into().unwrap()),
+            pixel_width,
+            pixel_height,
             click_mapping: None,
         })
     }

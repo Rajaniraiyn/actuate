@@ -2,7 +2,7 @@
 
 Run `unimation session --json` for the JSONL protocol. Without `--json`, the CLI returns a framed text transcript. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
 
-The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
+The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` and `linux::session::LinuxRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`. Framing is shared by every platform through `unimation::transport`; the tables below describe macOS names, and [the Linux guide](linux.md#session-operations) lists the Linux equivalents and additions.
 
 | Operation | Fields | Result |
 | --- | --- | --- |
@@ -147,3 +147,14 @@ They must not fall back to global Escape, which can interrupt the hosting termin
 `unimation --provider ios --device UUID --device-set /absolute/path session` selects the iOS provider.
 It uses a frontmost guest application rather than the macOS PID observation selector.
 See [the iOS protocol](ios.md#jsonl-session) for supported operations and current limits.
+
+
+## Windows session
+
+The Windows session accepts `capabilities`, `discover`, `windows`, `displays`,
+`snapshot` (alias `observe`) with `request: ObserveRequest`, `inspect`, `snapshots`,
+`semantic`, explicit `pointer`, `text` and `key` delivery, `windows_wheel` with integer
+detents (positive vertical means down, positive horizontal means right), `capture` with
+a `path`, and `diff`. Unsupported operations return native errors instead of changing
+routes. See [Windows validation](windows-validation.md); it has cross-target type checks
+only. The Linux session is documented in [the Linux guide](linux.md#session-operations).

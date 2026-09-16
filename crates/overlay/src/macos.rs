@@ -3,9 +3,9 @@ mod overview;
 use overlay::CursorScope;
 use overlay::{
     CursorAppearance, CursorCommand as Command,
-    motion::{self, MotionStyle},
     shape::{HOTSPOT, OUTLINE, UNIT},
 };
+use unimation::motion::{self, MotionStyle};
 const SIZE: f64 = 96.;
 const TIP: (f64, f64) = (96., 160.);
 fn appkit_origin(x: f64, y: f64, main_height: f64) -> (f64, f64) {
@@ -43,11 +43,11 @@ define_class!(
             );
             let [r,g,b] = appearance.color;
             let pulse = visual.pulse.get();
-            if let Some(t) = pulse {
-                let radius = (5. + 17. * t) * scale;
+            if let Some(sample) = pulse.and_then(|t| overlay::ripple::sample(t, appearance.motion)) {
+                let radius = sample.radius * scale;
                 let ring = NSBezierPath::bezierPathWithOvalInRect(NSRect::new(NSPoint::new(TIP.0-radius,TIP.1-radius),NSSize::new(radius*2.,radius*2.)));
-                NSColor::colorWithSRGBRed_green_blue_alpha(r,g,b,(1.-t)*0.65).setStroke();
-                ring.setLineWidth(2. * scale * (1.-t*0.5));
+                NSColor::colorWithSRGBRed_green_blue_alpha(r,g,b,sample.alpha).setStroke();
+                ring.setLineWidth(sample.width * scale);
                 ring.stroke();
             }
             let shape=NSBezierPath::bezierPath();
@@ -301,7 +301,7 @@ fn tick() {
             s.last_origin = Some((x, y));
         }
         if let Some(time) = s.pulse {
-            let t = time.elapsed().as_secs_f64() / 0.45;
+            let t = time.elapsed().as_secs_f64() / overlay::ripple::DURATION_SECONDS;
             if t >= 1. || s.view.ivars().appearance.borrow().motion == MotionStyle::Reduced {
                 s.pulse = None;
                 s.last_activity = Instant::now();

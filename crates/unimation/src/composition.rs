@@ -1,7 +1,6 @@
 //! Capability composition without platform switches or implicit fallback routes.
 use crate::{
-    Capture, Effect, ElementRef, NativeError, Receipt, Result, SemanticAction, SemanticActions,
-    Snapshot,
+    Capture, ElementRef, NativeError, Receipt, Result, SemanticAction, SemanticActions, Snapshot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -18,8 +17,8 @@ pub struct ObservationBudget {
 impl Default for ObservationBudget {
     fn default() -> Self {
         Self {
-            max_nodes: 1000,
-            max_depth: 30,
+            max_nodes: crate::default_max_nodes(),
+            max_depth: crate::default_max_depth(),
         }
     }
 }
@@ -53,11 +52,10 @@ impl NormalizedPoint {
         {
             Ok(Self { x, y })
         } else {
-            Err(NativeError {
-                code: "invalid_coordinates".into(),
-                message: "Normalized coordinates must be finite and between 0 and 1".into(),
-                effect: Effect::None,
-            })
+            Err(NativeError::new(
+                "invalid_coordinates",
+                "Normalized coordinates must be finite and between 0 and 1",
+            ))
         }
     }
     pub fn x(self) -> f64 {
@@ -282,6 +280,7 @@ impl<O, I: RelativePointerInput, C, V, A> RelativePointerInput for Backend<O, I,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Effect;
     #[test]
     fn coordinates_cannot_bypass_validation_via_json() {
         for input in [r#"{"x":2,"y":0}"#, r#"{"x":0,"y":0,"space":"pixels"}"#] {

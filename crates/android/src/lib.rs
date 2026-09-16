@@ -11,11 +11,7 @@ pub mod wireless;
 use std::{io::Write, time::Duration};
 use unimation::{Effect, NativeError, Receipt, Result};
 fn error(code: &str, message: impl ToString, effect: Effect) -> NativeError {
-    NativeError {
-        code: code.into(),
-        message: message.to_string(),
-        effect,
-    }
+    NativeError::new(code, message).with_effect(effect)
 }
 /// A selected device's command channel. Implementations retain their own connections.
 pub trait CommandTransport {
@@ -124,19 +120,13 @@ impl<D: CommandTransport> Android<D> {
     }
     pub fn capture_png(&mut self) -> Result<Vec<u8>> {
         let bytes = self.run("screencap -p", 64 * 1024 * 1024)?;
-        if bytes.len() < 33
-            || !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-            || &bytes[12..16] != b"IHDR"
-            || bytes[8..12] != 13u32.to_be_bytes()
-            || bytes[16..20] == [0; 4]
-            || bytes[20..24] == [0; 4]
-        {
-            return Err(error(
+        unimation::image::png_dimensions(&bytes).map_err(|e| {
+            error(
                 "android_capture",
-                "device did not return a PNG",
+                format!("device did not return a PNG: {e}"),
                 Effect::None,
-            ));
-        }
+            )
+        })?;
         Ok(bytes)
     }
     fn input(&mut self, command: &str) -> Result<Receipt> {
