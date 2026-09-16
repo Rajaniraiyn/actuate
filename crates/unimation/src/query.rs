@@ -23,7 +23,7 @@ impl TextMatch {
 pub struct NodeQuery {
     /// Native role, such as AXButton. No role aliases are inferred.
     pub role: Option<TextMatch>,
-    /// Matches plain or attributed AX title, description and label text without choosing a canonical name.
+    /// Matches native name/description and plain or attributed AX title/label text.
     pub name: Option<TextMatch>,
     /// Exact raw JSON equality, including native type tags. All predicates must match.
     #[serde(default)]
@@ -103,19 +103,31 @@ pub fn query_nodes(snapshot: &Snapshot, query: &NodeQuery) -> QueryResult {
     for node in &snapshot.nodes {
         let mut predicates = vec![];
         if let Some(role) = &query.role {
-            predicates.push(text(node, &["AXRole"], role));
+            predicates.push(text(
+                node,
+                if node.attributes.keys().any(|key| key.starts_with("AX")) {
+                    &["AXRole"]
+                } else {
+                    &["role"]
+                },
+                role,
+            ));
         }
         if let Some(name) = &query.name {
             predicates.push(text(
                 node,
-                &[
-                    "AXTitle",
-                    "AXDescription",
-                    "AXLabel",
-                    "AXAttributedTitle",
-                    "AXAttributedDescription",
-                    "AXAttributedLabel",
-                ],
+                if node.attributes.keys().any(|key| key.starts_with("AX")) {
+                    &[
+                        "AXTitle",
+                        "AXDescription",
+                        "AXLabel",
+                        "AXAttributedTitle",
+                        "AXAttributedDescription",
+                        "AXAttributedLabel",
+                    ]
+                } else {
+                    &["name", "description"]
+                },
                 name,
             ));
         }
@@ -183,6 +195,31 @@ mod tests {
                 issues: vec![],
             }],
         }
+    }
+    #[test]
+    fn portable_names_roles_and_read_failures_preserve_native_data() {
+        let mut source = snapshot();
+        source.nodes[0].attributes = BTreeMap::from([
+            ("role".into(), json!("button")),
+            ("name".into(), json!("Save")),
+        ]);
+        let query = NodeQuery {
+            role: Some(TextMatch::Exact {
+                value: "button".into(),
+            }),
+            name: Some(TextMatch::Exact {
+                value: "Save".into(),
+            }),
+            ..Default::default()
+        };
+        let result = query_nodes(&source, &query);
+        assert_eq!(result.matches.len(), 1);
+        assert_eq!(result.matches[0].attributes, source.nodes[0].attributes);
+        source.nodes[0].attributes.remove("name");
+        source.nodes[0]
+            .issues
+            .push(json!({"attribute":"name","error":"disconnected"}));
+        assert_eq!(query_nodes(&source, &query).indeterminate.len(), 1);
     }
     #[test]
     fn attributed_names_are_searchable_without_parsing_native_diagnostics() {

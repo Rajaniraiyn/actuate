@@ -1,6 +1,6 @@
 # Backend implementation guide
 
-Implement capability traits individually. `Providers<O, S, P, T>` allows separate implementations for observation, semantic actions, pointer input, and text. A capability is unavailable until a provider implements it. Empty platform crates deliberately implement no traits and never panic with `todo!()`.
+Implement capability traits individually. `Providers<O, S, P, T>` allows separate implementations for observation, semantic actions, pointer input, and text. A capability is unavailable until a provider implements it. Unimplemented capabilities return explicit errors or have no trait implementation; native providers never panic with `todo!()`.
 
 Native handles remain provider-owned. Reference namespaces change when a provider restarts. Never reinterpret a foreign reference or resolve a stale reference through a similar label or position. Receipts distinguish dispatch from verified consumption. Failures after possible native mutation must report unknown effects, without automatic retry.
 
@@ -26,9 +26,13 @@ Next work:
 
 ## Windows
 
-Start UIA on an owned MTA worker. Respect handler registration and removal ownership. Add UIA, MSAA/IA2 and Java Access Bridge as separate routes. Match native GUI-thread input routing and `AttachThreadInput` resource effects to the architecture. A timed-out COM call is not cancelled merely because Rust stopped awaiting it.
+The initial implementation and host test instructions are in [Windows validation](windows-validation.md). Native UIA handles stay on their creating thread; global input is separate from accessibility actions. No live Windows validation has been performed from this macOS host.
+
+For a fully isolated provider, start UIA on an owned MTA worker. Respect handler registration and removal ownership. Add UIA, MSAA/IA2 and Java Access Bridge as separate routes. Match native GUI-thread input routing and `AttachThreadInput` resource effects to the architecture. A timed-out COM call is not cancelled merely because Rust stopped awaiting it.
 
 ## Linux
+
+The initial implementation separates AT-SPI observation from X11 capture/input. See [Linux validation](linux-validation.md) and the [desktop acceptance checklist](desktop-acceptance.md). An explicit Wayland RemoteDesktop portal provider supplies granted input through a persistent session; PipeWire capture is still pending. See [Wayland sessions](wayland.md).
 
 Keep AT-SPI observation separate from X11, portal/libei, compositor-specific and uinput delivery. Negotiate Wayland devices and coordinate regions. No implicit switch from session-scoped delivery to global input. Handle session revocation and device removal during gestures.
 
@@ -63,3 +67,12 @@ See [iOS session usage and validation](ios.md).
 The iOS crate now also owns typed sessions and the JSONL adapter. Independent HID
 providers implement touch, hardware controls and keyboard input. Shared provider and
 overlay boundaries are described in [composition](composition.md).
+
+
+## Desktop overlay implementations
+
+The shared `overlay` crate now builds a native helper for macOS, Windows and X11.
+Use `OverlayController` as the independent `CursorVisualization` provider.
+[Windows](windows-overlay.md) and [Linux](linux-overlay.md) document window scope,
+workspace checks, rendering limitations and native test cases. Native Wayland
+window attachment remains unsupported until a compositor-specific provider exists.

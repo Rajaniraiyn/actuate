@@ -1,4 +1,6 @@
-//! Coordinates are Quartz-style logical desktop points, with a top-left origin.
+//! Rectangles and affine capture mappings use the coordinate basis declared by
+//! the provider. Origins may be negative. Callers must not mix macOS logical
+//! points, Windows physical desktop pixels or X11 server pixels.
 use crate::{Effect, NativeError, Point, Result};
 use serde::{Deserialize, Serialize};
 

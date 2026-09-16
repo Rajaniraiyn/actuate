@@ -2,7 +2,7 @@
 
 Run `unimation session --json` for the JSONL protocol. Without `--json`, the CLI returns a framed text transcript. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
 
-The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
+The extended operation table below describes the macOS session. Other providers implement a documented subset and reject unsupported operations; consult `capabilities` and their platform guides. The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
 
 | Operation | Fields | Result |
 | --- | --- | --- |
@@ -147,3 +147,52 @@ They must not fall back to global Escape, which can interrupt the hosting termin
 `unimation --provider ios --device UUID --device-set /absolute/path session` selects the iOS provider.
 It uses a frontmost guest application rather than the macOS PID observation selector.
 See [the iOS protocol](ios.md#jsonl-session) for supported operations and current limits.
+
+
+## Initial Windows and Linux sessions
+
+Both native desktop sessions accept `capabilities`, `discover`, `windows`,
+`displays`, `observe`/`snapshot` with `request: ObserveRequest`, `semantic` with
+an exact `target` and `action`, and explicit `pointer`, `key`, and `text` delivery
+requests where the provider implements them. Unsupported operations return native
+errors instead of changing routes. Use full returned `{session,id}` references.
+The initial sessions do not imply parity with macOS snapshot history, private
+extensions, image clicks or overlay operations.
+
+Library snapshots preserve provider attributes. The shared `view`, `query` and
+file-based `diff` commands work independently of native sessions. Keep one
+session open when collecting snapshots for a meaningful identity-based diff.
+The CLI's `id` field belongs to the reply envelope and is removed before typed
+provider request parsing; it is echoed even for operation errors.
+
+Capture, when implemented, uses `{ "op": "capture", "path": "desktop.png" }`
+in these initial providers. Coordinate basis and mapping metadata must accompany
+the returned frame. Native key codes depend on the provider. Mouse wheel detents
+must not be passed as pixel-scroll distances: native wheel extensions declare
+their units separately, while unsupported portable scrolling is rejected.
+
+
+The native wheel extensions use `x11_wheel` on Linux and `windows_wheel` on
+Windows, with integer `vertical` and `horizontal` detents and an optional desktop
+`point`. Positive vertical means down; positive horizontal means right. The Windows request also requires `delivery: {"kind":"global"}`; the X11
+extension identifies global delivery in its operation contract. These
+commands explicitly use shared desktop input. They do not promise a number of
+content pixels or a semantic scroll amount, and custom providers can reject them.
+
+### Wayland portal extension
+
+On Linux, `wayland_start` explicitly requests a RemoteDesktop portal session.
+It may open a compositor consent dialog. Discovery does not open one.
+
+```json
+{"op":"wayland_start","keyboard":true,"pointer":true,"screencast":true}
+{"op":"wayland","command":{"kind":"status"}}
+{"op":"wayland","command":{"kind":"select_stream","stream":123}}
+{"op":"wayland","command":{"kind":"stop"}}
+```
+
+Use an actual granted stream ID from status. Once selected, normal pointer requests
+use that stream's logical coordinates. They must not reuse X11 root coordinates
+or screenshot pixels without a validated mapping. This initial provider uses
+D-Bus Notify input; EIS and PipeWire frame capture are pending. See
+[Wayland details](wayland.md) for delivery restrictions and validation.

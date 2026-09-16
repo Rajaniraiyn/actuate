@@ -1,8 +1,16 @@
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+mod desktop;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use desktop::run_host;
 use usage::{Cli, Subcommands, ValueEnum};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum Provider {
     Native,
+    #[cfg(target_os = "windows")]
+    Windows,
+    #[cfg(target_os = "linux")]
+    Linux,
     #[cfg(target_os = "macos")]
     Macos,
     #[cfg(target_os = "macos")]
@@ -437,7 +445,7 @@ fn run(
     }
     run_host(command, connection, format)
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn run_host(
     _: Command,
     _: Connection,
@@ -648,15 +656,26 @@ fn run_host(
 }
 #[cfg(target_os = "macos")]
 fn session(format: unimation::OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = macos::session::MacSession::new();
+    serve_session(format, |request| runtime.dispatch(request))
+}
+fn serve_session(
+    format: unimation::OutputFormat,
+    mut dispatch: impl FnMut(serde_json::Value) -> unimation::Result<serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
     use serde_json::{Value, json};
     use std::io::{BufRead, Write};
-    let mut runtime = macos::session::MacSession::new();
     for line in std::io::stdin().lock().lines() {
         let line = line?;
         let request = serde_json::from_str::<Value>(&line);
         let id = request.as_ref().ok().and_then(|v| v.get("id")).cloned();
         let result = match request {
-            Ok(r) => runtime.dispatch(r),
+            Ok(mut r) => {
+                if let Some(object) = r.as_object_mut() {
+                    object.remove("id");
+                }
+                dispatch(r)
+            }
             Err(e) => Err(unimation::NativeError {
                 code: "invalid_request".into(),
                 message: e.to_string(),

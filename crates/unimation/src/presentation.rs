@@ -160,6 +160,103 @@ impl PresentationAdapter for AxPresentationAdapter {
         node.attributes.get("AXRole").and_then(string) == Some("AXScrollArea")
     }
 }
+fn uses_ax_attributes(node: &Node) -> bool {
+    node.attributes.keys().any(|key| key.starts_with("AX"))
+        || node.actions.iter().any(|action| action.starts_with("AX"))
+}
+/// Default projection for native AX records and neutral desktop provider fields.
+/// Native observations remain unchanged; visibility does not imply hit-testability.
+pub struct NativePresentationAdapter;
+impl PresentationAdapter for NativePresentationAdapter {
+    fn project(&self, node: &Node, depth: usize, limit: usize) -> CompactNode {
+        if uses_ax_attributes(node) {
+            return AxPresentationAdapter.project(node, depth, limit);
+        }
+        let mut output = compact(node, depth, limit);
+        let text = |key: &str| node.attributes.get(key).and_then(string);
+        output.role = text("role").map(|s| preview(s, limit));
+        let name = ["name", "description"]
+            .into_iter()
+            .find_map(|key| text(key).filter(|s| !s.is_empty()).map(|s| (key, s)));
+        output.name = name.map(|(_, s)| preview(s, limit));
+        output.name_attribute = name.map(|(key, _)| key.into());
+        output.value = node.attributes.get("value").map(|v| {
+            preview(
+                &ax_scalar(v).unwrap_or_else(|| "<unknown; inspect>".into()),
+                limit,
+            )
+        });
+        output.enabled = boolean(node, "enabled");
+        output.focused = boolean(node, "focused");
+        output.selected = boolean(node, "selected");
+        output.expanded = boolean(node, "expanded");
+        output.visibility_evidence = ["hidden", "offscreen", "visible", "showing"]
+            .into_iter()
+            .filter_map(|key| {
+                boolean(node, key).map(|value| VisibilityEvidence {
+                    attribute: key.into(),
+                    value,
+                })
+            })
+            .collect();
+        let hidden = output.visibility_evidence.iter().any(|e| {
+            if matches!(e.attribute.as_str(), "visible" | "showing") {
+                !e.value
+            } else {
+                e.value
+            }
+        });
+        output.visibility = if hidden {
+            Visibility::Hidden
+        } else {
+            Visibility::Unknown
+        };
+        // UIA offscreen=false and AT-SPI showing=true do not prove unobscured pixels.
+        output.interactive_candidate = !node.actions.is_empty();
+        output.retain_context = matches!(
+            text("role"),
+            Some("application" | "window" | "frame" | "dialog" | "scroll pane")
+        );
+        output
+    }
+    fn value_is_comparable(&self, node: &Node) -> bool {
+        if uses_ax_attributes(node) {
+            return AxPresentationAdapter.value_is_comparable(node);
+        }
+        node.attributes.get("value").and_then(ax_scalar).is_some()
+    }
+    fn has_uncertain_values(&self, node: &Node) -> bool {
+        if uses_ax_attributes(node) {
+            return AxPresentationAdapter.has_uncertain_values(node);
+        }
+        node.attributes.contains_key("value") && !self.value_is_comparable(node)
+    }
+    fn bounds(&self, node: &Node) -> Option<ViewportBounds> {
+        if uses_ax_attributes(node) {
+            return AxPresentationAdapter.bounds(node);
+        }
+        let bounds = node.attributes.get("bounds")?;
+        let bounds = ViewportBounds {
+            x: bounds.get("x")?.as_f64()?,
+            y: bounds.get("y")?.as_f64()?,
+            width: bounds.get("width")?.as_f64()?,
+            height: bounds.get("height")?.as_f64()?,
+        };
+        bounds.valid().then_some(bounds)
+    }
+    fn is_viewport(&self, node: &Node) -> bool {
+        if uses_ax_attributes(node) {
+            return AxPresentationAdapter.is_viewport(node);
+        }
+        boolean(node, "is_viewport") == Some(true)
+    }
+    fn is_scroll_container(&self, node: &Node) -> bool {
+        if uses_ax_attributes(node) {
+            return AxPresentationAdapter.is_scroll_container(node);
+        }
+        boolean(node, "is_scroll_container") == Some(true)
+    }
+}
 #[derive(Debug, Clone, Serialize)]
 pub struct InheritedHiddenEvidence {
     pub ancestor: ElementRef,
@@ -409,7 +506,7 @@ pub fn render_snapshot(
     snapshot: &Snapshot,
     options: &PresentationOptions,
 ) -> Result<CompactSnapshot> {
-    render_snapshot_with_adapter(snapshot, options, &AxPresentationAdapter)
+    render_snapshot_with_adapter(snapshot, options, &NativePresentationAdapter)
 }
 pub fn render_snapshot_with_adapter(
     snapshot: &Snapshot,
@@ -724,7 +821,13 @@ pub fn render_view_diff(
     options: &PresentationOptions,
     max_changes: usize,
 ) -> Result<String> {
-    render_view_diff_with_adapter(before, after, options, max_changes, &AxPresentationAdapter)
+    render_view_diff_with_adapter(
+        before,
+        after,
+        options,
+        max_changes,
+        &NativePresentationAdapter,
+    )
 }
 pub fn render_view_diff_with_adapter(
     before: &Snapshot,
@@ -884,6 +987,64 @@ mod tests {
             session: "test".into(),
             id,
         }
+    }
+    #[test]
+    fn portable_fields_render_without_claiming_visibility_or_changing_records() {
+        let mut n = node(1, &[]);
+        n.attributes = std::collections::BTreeMap::from([
+            ("role".into(), serde_json::json!("button")),
+            ("name".into(), serde_json::json!("Save")),
+            ("enabled".into(), serde_json::json!(true)),
+            ("offscreen".into(), serde_json::json!(false)),
+            (
+                "bounds".into(),
+                serde_json::json!({"x":-100,"y":20,"width":80,"height":30}),
+            ),
+        ]);
+        n.actions = vec!["invoke".into()];
+        let original = n.attributes.clone();
+        let projected = NativePresentationAdapter.project(&n, 0, 100);
+        assert_eq!(projected.name.unwrap().text, "Save");
+        assert_eq!(projected.role.unwrap().text, "button");
+        assert_eq!(projected.enabled, Some(true));
+        assert_eq!(projected.visibility, Visibility::Unknown);
+        assert!(projected.interactive_candidate);
+        assert_eq!(NativePresentationAdapter.bounds(&n).unwrap().x, -100.);
+        assert_eq!(n.attributes, original);
+        n.attributes
+            .insert("offscreen".into(), serde_json::json!(true));
+        assert_eq!(
+            NativePresentationAdapter.project(&n, 0, 100).visibility,
+            Visibility::Hidden
+        );
+        n.attributes
+            .insert("AXRole".into(), serde_json::json!("AXButton"));
+        n.attributes
+            .insert("AXTitle".into(), serde_json::json!("Native AX name"));
+        assert_eq!(
+            NativePresentationAdapter
+                .project(&n, 0, 100)
+                .name
+                .unwrap()
+                .text,
+            "Native AX name"
+        );
+    }
+    #[test]
+    fn portable_value_diff_uses_retained_scalar_values() {
+        let mut n = node(9, &[]);
+        n.attributes = std::collections::BTreeMap::from([
+            ("role".into(), serde_json::json!("slider")),
+            ("value".into(), serde_json::json!(5)),
+        ]);
+        let before = snapshot(vec![n.clone()]);
+        n.attributes.insert("value".into(), serde_json::json!(6));
+        let mut after = snapshot(vec![n]);
+        after.revision = before.revision + 1;
+        let diff = render_view_diff(&before, &after, &PresentationOptions::default(), 20).unwrap();
+        assert!(diff.contains("6"), "{diff}");
+        let rendered = render_snapshot(&after, &PresentationOptions::default()).unwrap();
+        assert_eq!(rendered.rows[0].role.as_ref().unwrap().text, "slider");
     }
     fn node(id: u64, children: &[u64]) -> Node {
         Node {

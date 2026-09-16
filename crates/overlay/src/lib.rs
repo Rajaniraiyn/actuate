@@ -130,8 +130,6 @@ macro_rules! unavailable_renderer {
         }
     };
 }
-unavailable_renderer!(linux, "Linux");
-unavailable_renderer!(windows, "Windows");
 unavailable_renderer!(ios, "iOS/iPadOS");
 unavailable_renderer!(android, "Android");
 
@@ -234,7 +232,7 @@ mod tests {
     }
     #[test]
     fn unavailable_renderer_does_not_acknowledge_a_frame() {
-        let error = linux::UnavailableRenderer
+        let error = ios::UnavailableRenderer
             .visualize(CursorCommand::Show)
             .unwrap_err();
         assert_eq!(error.code, "cursor_renderer_unavailable");

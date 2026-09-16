@@ -142,4 +142,22 @@ input operation whose effect is unknown.
 
 Idle float is an overlay-only drawing offset. It never dispatches HID reports or
 changes input targets. Reduced motion disables it. Its portable configuration can
-be shared by future Windows/Linux renderers; those renderers remain stubs.
+be shared by the Windows and X11 renderers. Native Wayland rendering requires a
+compositor-specific provider.
+
+
+## Desktop cursor providers
+
+`OverlayController` implements `CursorVisualization` independently of input traits.
+Start the native `unimation-overlay` executable with an explicit path and inject
+that controller wherever a visual provider is needed. The same typed commands
+configure appearance, desktop/window scope, movement, click feedback and visibility
+on macOS, Windows and X11. A queued command is not a rendered-frame acknowledgement
+or proof that input reached its target. Global input and a decorative cursor remain
+separate capabilities.
+
+Windows uses a layered click-through window. X11 uses an input-empty Shape window.
+Both track window scope without raising the target. Their ordering checks are
+polled, so atomic foreign-window attachment is not guaranteed. See the
+[Windows overlay](windows-overlay.md) and [Linux overlay](linux-overlay.md) guides
+for ownership, workspace, clipping and rendering limits.

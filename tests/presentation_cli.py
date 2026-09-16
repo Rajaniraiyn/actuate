@@ -51,6 +51,19 @@ def main():
         assert not run('query', a, '--name', 'Find').lstrip().startswith('{')
         native_delta = json.loads(run('diff', a, b, '--json'))
         assert native_delta['modified'][0]['reference'] == ref(2)
+        # Windows/AT-SPI records must remain usable through the same offline CLI.
+        desktop = copy.deepcopy(before)
+        desktop['nodes'][0]['attributes'] = {'role': 'application', 'name': 'Editor'}
+        desktop['nodes'][1]['attributes'] = {'role': 'button', 'name': 'Native Save', 'enabled': True, 'offscreen': False}
+        desktop['nodes'][1]['actions'] = ['invoke']
+        desktop['nodes'][2]['attributes'] = {'role': 'button', 'name': 'Hidden Save', 'offscreen': True}
+        desktop['nodes'][2]['actions'] = ['invoke']
+        a.write_text(json.dumps(desktop))
+        text = run('view', a, '--interactive', '--hide-hidden')
+        assert 'Native Save' in text and 'Hidden Save' not in text
+        queried = json.loads(run('query', a, '--name', 'Native Save', '--role', 'button', '--json'))
+        assert queried['matches'][0]['reference'] == ref(2)
+        assert json.loads(run('view', a, '--json')) == desktop
         invalid = subprocess.run([BIN, 'view', str(a), '--format', 'typo'], capture_output=True)
         assert invalid.returncode != 0
     print('PASS CLI full JSON preservation, compact filtering, text escaping, scope, and projected/native diffs')

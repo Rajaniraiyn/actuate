@@ -1,9 +1,17 @@
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 fn main() {
     #[cfg(target_os = "macos")]
     macos::run();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    windows::run();
+    #[cfg(target_os = "linux")]
+    linux::run();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         eprintln!("Native cursor renderer is unavailable on this platform");
         std::process::exit(1);
