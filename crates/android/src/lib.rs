@@ -2,6 +2,7 @@
 //! No host adb executable is started. See the README for pairing and timeout limits.
 use serde::Serialize;
 pub mod apps;
+pub mod cursor;
 pub mod hid;
 pub mod jsonl;
 pub mod qr;
@@ -24,6 +25,17 @@ pub trait CommandTransport {
         stdout: &mut dyn Write,
         stderr: &mut dyn Write,
     ) -> Result<Option<u8>>;
+}
+/// Borrow an existing session when composing observation and input adapters.
+impl<T: CommandTransport + ?Sized> CommandTransport for &mut T {
+    fn execute(
+        &mut self,
+        command: &str,
+        stdout: &mut dyn Write,
+        stderr: &mut dyn Write,
+    ) -> Result<Option<u8>> {
+        (**self).execute(command, stdout, stderr)
+    }
 }
 mod connection;
 mod direct;

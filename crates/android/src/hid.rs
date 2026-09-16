@@ -5,8 +5,10 @@
 //! Descriptor follows USB HID 1.11 Appendix E.10, with wheel and Consumer AC Pan.
 //! https://www.usb.org/document-library/device-class-definition-hid-111
 //! Relative counts are accelerated by Android; they are not screen pixels.
+mod linear;
 use crate::{connection::Connection, error};
 use droidmux::shell::{ShellOptions, ShellSession};
+pub use linear::LinearPointer;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use unimation::{Effect, Receipt, Result};
@@ -17,6 +19,18 @@ const DESCRIPTOR: &[u8] = &[
     0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7f, 0x75, 0x08, 0x95, 0x03,
     0x81, 0x06, 0x05, 0x0c, 0x0a, 0x38, 0x02, 0x95, 0x01, 0x81, 0x06, 0xc0, 0xc0,
 ];
+
+fn feedback_delta(error: f32) -> i8 {
+    if error.abs() <= 1.0 {
+        return 0;
+    }
+    let count = (error * 0.2).round().clamp(-24.0, 24.0) as i8;
+    if count == 0 {
+        error.signum() as i8
+    } else {
+        count
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum Button {
@@ -215,6 +229,143 @@ impl<'a> Pointer<'a> {
     pub fn move_relative(&mut self, dx: Delta, dy: Delta) -> Result<Receipt> {
         self.report(dx, dy, Delta::default(), Delta::default())
     }
+    /// Aim using measured native hotspot feedback. Relative counts are never
+    /// treated as pixels. Geometry must come from a prior cursor observation.
+    /// Retains buttons for dragging; callers must release them on any failure.
+    /// Success verifies position only, not application completion or hit testing.
+    pub fn move_to_observed(
+        &mut self,
+        target: crate::cursor::Point,
+        geometry: &crate::cursor::DisplayGeometry,
+    ) -> Result<crate::cursor::CursorObservation> {
+        if !target.x.is_finite()
+            || !target.y.is_finite()
+            || target.x < 0.0
+            || target.y < 0.0
+            || target.x >= geometry.width as f32
+            || target.y >= geometry.height as f32
+        {
+            return Err(error(
+                "hid_target",
+                "target is outside the supplied display",
+                Effect::None,
+            ));
+        }
+        let mut moved = false;
+        let result = (|| {
+            let mut previous_time = None;
+            let mut cursor_layer = None;
+            let mut settled = 0;
+            for _ in 0..96 {
+                let observed = crate::cursor::observe(self)?;
+                if cursor_layer.is_some_and(|id| id != observed.layer_id) {
+                    return Err(error(
+                        "hid_cursor_changed",
+                        "native cursor changed while aiming",
+                        Effect::None,
+                    ));
+                }
+                cursor_layer = Some(observed.layer_id);
+                if &observed.geometry != geometry {
+                    return Err(error(
+                        "hid_geometry_changed",
+                        "display changed while aiming",
+                        Effect::None,
+                    ));
+                }
+                if previous_time
+                    .zip(observed.elapsed_realtime_nanos)
+                    .is_some_and(|(before, now)| now <= before)
+                {
+                    return Err(error(
+                        "hid_stale_observation",
+                        "cursor observation did not advance",
+                        Effect::None,
+                    ));
+                }
+                previous_time = observed.elapsed_realtime_nanos;
+                let dx = target.x - observed.position.x;
+                let dy = target.y - observed.position.y;
+                if dx.hypot(dy) <= 2.0 {
+                    settled += 1;
+                    if settled == 2 {
+                        return Ok(observed);
+                    }
+                } else {
+                    settled = 0;
+                    // Conservative control gain, not a pixels/count calibration.
+                    // Every report is followed by a new native observation.
+                    self.move_relative(Delta(feedback_delta(dx)), Delta(feedback_delta(dy)))?;
+                    moved = true;
+                }
+                self.connection
+                    .runtime
+                    .run(self.connection.timeout, Effect::Unknown, async {
+                        tokio::time::sleep(Duration::from_millis(40)).await;
+                        Ok(())
+                    })?;
+            }
+            Err(error(
+                "hid_target_unreached",
+                "cursor did not settle within two pixels after 96 observations",
+                Effect::None,
+            ))
+        })();
+        result.map_err(|mut e| {
+            if moved {
+                e.effect = Effect::Unknown;
+            }
+            e
+        })
+    }
+    /// Dispatch a prevalidated path in relative HID counts, retaining held buttons.
+    /// Android accelerates these counts; this does not promise a screen endpoint.
+    /// Deadlines are measured from one start, with no input retries on failure.
+    pub fn move_smooth(&mut self, plan: &unimation::motion::RelativeMotionPlan) -> Result<Receipt> {
+        if self.failed || self.closed {
+            return Err(error(
+                "hid_unavailable",
+                "HID session is closed or failed",
+                Effect::None,
+            ));
+        }
+        let start = std::time::Instant::now();
+        let mut dispatched = false;
+        for sample in plan.samples() {
+            if let Some(wait) = sample.at.checked_sub(start.elapsed()) {
+                // Keep transport and diagnostic tasks running while awaiting the
+                // next sample; blocking this current-thread runtime stalls them.
+                self.connection.runtime.run(
+                    wait.saturating_add(self.connection.timeout),
+                    if dispatched {
+                        Effect::Unknown
+                    } else {
+                        Effect::None
+                    },
+                    async {
+                        tokio::time::sleep(wait).await;
+                        Ok(())
+                    },
+                )?;
+            }
+            self.move_relative(Delta(sample.dx), Delta(sample.dy))
+                .map_err(|mut failure| {
+                    if dispatched {
+                        failure.effect = Effect::Unknown;
+                    }
+                    failure
+                })?;
+            dispatched = true;
+        }
+        Ok(Receipt {
+            effect: if dispatched {
+                Effect::Dispatched
+            } else {
+                Effect::None
+            },
+            route: "android.uhid.relative_pointer".into(),
+        })
+    }
     pub fn scroll(&mut self, vertical: Delta, horizontal: Delta) -> Result<Receipt> {
         self.report(Delta::default(), Delta::default(), vertical, horizontal)
     }
@@ -268,6 +419,19 @@ impl<'a> Pointer<'a> {
 impl Drop for Pointer<'_> {
     fn drop(&mut self) {
         let _ = self.close();
+    }
+}
+
+/// Observation and ordinary commands share the pointer's existing ADB session.
+/// Each command uses a separate logical stream; no second device connection is opened.
+impl crate::CommandTransport for Pointer<'_> {
+    fn execute(
+        &mut self,
+        command: &str,
+        stdout: &mut dyn std::io::Write,
+        stderr: &mut dyn std::io::Write,
+    ) -> Result<Option<u8>> {
+        self.connection.execute(command, stdout, stderr)
     }
 }
 
@@ -363,5 +527,50 @@ mod tests {
             "Input Reader State:\n  Device 12: example-other\n",
             "example"
         ));
+    }
+}
+
+#[cfg(test)]
+mod feedback_tests {
+    use super::feedback_delta;
+
+    #[test]
+    fn settled_axis_stays_still() {
+        for error in [-1.0, -0.999, -0.0, 0.0, 0.999, 1.0] {
+            assert_eq!(feedback_delta(error), 0, "error={error}");
+        }
+    }
+
+    #[test]
+    fn corrections_preserve_direction_without_rounding_to_zero() {
+        // Fractional pixel errors near the deadzone must still make progress;
+        // diagonal corrections must never reverse either axis.
+        for error in [
+            1.000_001, 1.1, 2.0, 2.49, 2.5, 4.9, 15.0, 119.0, 120.0, 4096.0,
+        ] {
+            let positive = feedback_delta(error);
+            let negative = feedback_delta(-error);
+            assert!((1..=24).contains(&positive), "error={error}");
+            assert_eq!(negative, -positive, "error={error}");
+        }
+    }
+
+    #[test]
+    fn finite_display_errors_always_fit_conservative_report_limit() {
+        // Exercise quarter-pixel errors across large display dimensions, plus
+        // finite extremes: a large displacement must not wrap an i8 report.
+        for error in (-65_536..=65_536)
+            .map(|n| n as f32 / 4.0)
+            .chain([-f32::MAX, f32::MAX])
+        {
+            let count = feedback_delta(error);
+            assert!((-24..=24).contains(&count), "error={error}");
+            if error.abs() > 1.0 {
+                assert_ne!(count, 0, "error={error}");
+                assert_eq!(count.signum(), error.signum() as i8, "error={error}");
+            }
+        }
+        assert_eq!(feedback_delta(f32::MAX), 24);
+        assert_eq!(feedback_delta(-f32::MAX), -24);
     }
 }

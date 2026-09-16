@@ -12,10 +12,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let endpoint =
         android::qr::discover_connection(&host.paired_device_id()?, Duration::from_secs(10))?;
     let mut input = host.connect(endpoint, FirstConnectionPolicy::RequireKnownCertificate)?;
-    let mut observer =
-        Android::new(host.connect(endpoint, FirstConnectionPolicy::RequireKnownCertificate)?);
     // Use Calculator for harmless pointer/button testing.
-    observer.launch(
+    Android::new(&mut input).launch(
         &"com.sec.android.app.popupcalculator/.Calculator"
             .to_owned()
             .try_into()?,
@@ -23,7 +21,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Calculator launch dispatched");
     let mut pointer = Pointer::open(&mut input)?;
     println!("Native pointer registered");
-    pointer.move_relative(Delta::new(20)?, Delta::new(0)?)?;
+    let path = unimation::motion::RelativeMotionPlan::new(
+        60,
+        20,
+        Duration::from_millis(650),
+        40,
+        unimation::motion::MotionStyle::Curved,
+    )?;
+    pointer.move_smooth(&path)?;
     println!("Hover report dispatched");
     for button in [Button::Primary, Button::Secondary, Button::Middle] {
         pointer.button(button, true)?;
@@ -33,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pointer.scroll(Delta::new(-3)?, Delta::new(0)?)?;
     println!("Wheel report dispatched");
     let path = std::env::temp_dir().join(format!("unimation-hid-{}.png", std::process::id()));
-    let frame = android::jsonl::capture_file(&mut observer, &path)?;
+    let frame = android::jsonl::capture_file(&mut Android::new(&mut pointer), &path)?;
     println!("{frame}");
     pointer.close()?;
     println!("Native pointer closed");
