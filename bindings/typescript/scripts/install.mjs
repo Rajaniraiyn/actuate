@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const repository = "Rajaniraiyn/actuate";
 export function target(platform = process.platform, arch = process.arch) {
-  const targets = { "win32-x64": "x86_64-pc-windows-msvc", "darwin-x64": "x86_64-apple-darwin",
+  const targets = { "win32-x64": "x86_64-pc-windows-msvc", "win32-arm64": "aarch64-pc-windows-msvc", "darwin-x64": "x86_64-apple-darwin",
     "darwin-arm64": "aarch64-apple-darwin", "linux-x64": "x86_64-unknown-linux-gnu", "linux-arm64": "aarch64-unknown-linux-gnu" };
   const result = targets[`${platform}-${arch}`];
   if (!result) throw new Error(`No Actuate release binary for ${platform}/${arch}`);

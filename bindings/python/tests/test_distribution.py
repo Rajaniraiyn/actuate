@@ -11,6 +11,12 @@ from packaging.tags import Tag
 import actuate_build as backend
 
 class Distribution(unittest.TestCase):
+    def test_windows_arm64_selects_native_wheel(self):
+        arm = "actuate-0.1.0-cp310-abi3-win_arm64.whl"
+        x64 = "actuate-0.1.0-cp310-abi3-win_amd64.whl"
+        manifest = {"assets": {arm: {}, x64: {}}}
+        self.assertEqual(backend.select_wheel(manifest, "0.1.0", [Tag("cp310", "abi3", "win_arm64")]), arm)
+
     def test_target_selection_rejects_foreign_or_wrong_version_wheels(self):
         name = "actuate-0.1.0-cp310-abi3-win_amd64.whl"
         manifest = {"assets":{name:{},"actuate-9.0.0-cp310-abi3-win_amd64.whl":{}}}

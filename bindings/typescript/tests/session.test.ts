@@ -38,6 +38,7 @@ test("native errors and invalid input retain their effect", async () => {
 
 test("installer rejects unsupported platforms and corrupt bytes", async () => {
   expect(target("win32", "x64")).toBe("x86_64-pc-windows-msvc");
+  expect(target("win32", "arm64")).toBe("aarch64-pc-windows-msvc");
   expect(() => target("linux", "riscv64")).toThrow();
   const bytes = Buffer.from("native-addon");
   const manifest = {assets:{"addon.node":{size:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex")}}};

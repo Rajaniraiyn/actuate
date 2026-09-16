@@ -15,7 +15,7 @@ actuate --help
 actuate capabilities
 ```
 
-Release builds target Windows x64, macOS x64 and Apple silicon, and Linux x64 and
+Release builds target Windows x64 and ARM64, macOS x64 and Apple silicon, and Linux x64 and
 ARM64 with glibc 2.35 or newer. Other targets need a source build. Private releases
 require repository access.
 
