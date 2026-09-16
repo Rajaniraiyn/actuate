@@ -288,6 +288,10 @@ impl X11 {
             .filter_map(|w| self.window_record(w).ok())
             .collect())
     }
+    /// One toplevel by X window id.
+    pub fn window(&self, window_id: u32) -> Result<X11Window> {
+        self.window_record(window_id)
+    }
     /// The mapped toplevel of a pid, narrowed by title when given.
     pub fn window_for(&self, pid: u32, title: Option<&str>) -> Result<X11Window> {
         self.windows()?

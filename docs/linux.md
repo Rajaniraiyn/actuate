@@ -119,10 +119,14 @@ semantic click, a `semantic` action, a `hyprland_shortcut` with a target and an 
 click move it to the element's center first and pulse it once the route reports
 dispatch. Those routes never move the real pointer, so the soft cursor is the only
 visible trace of them.
-Window scope clips the glyph to the Hyprland window rectangle, follows the window when
-it moves and hides when the window is unmapped or not on its monitor's active
-workspace. Overlay-layer surfaces sit above every window, so an occluding window does
-not cover the glyph; that differs from the macOS attachment. The same renderer backs
+Window scope emulates the macOS window attachment on top of a layer surface, which
+Wayland always stacks above every window: the glyph is clipped to the Hyprland window
+rectangle, follows the window when it moves, hides when the window is unmapped, on
+another workspace or under a fullscreen window, and is cut away wherever a window
+stacked above the target covers it (`compositor::hyprland::stacking_above`, derived
+from Hyprland's tiers and client order). Geometry refreshes on Hyprland's event socket,
+so a workspace switch reveals or parks the glyph immediately, with a two-second poll as
+the fallback. The same renderer backs
 the standalone `unimation-overlay` executable through the JSONL protocol in the
 [overlay README](../crates/overlay/README.md). Acknowledgements remain `queued`.
 

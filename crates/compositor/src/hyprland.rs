@@ -163,6 +163,14 @@ impl Hyprland {
             timeout: Duration::from_secs(5),
         })
     }
+    /// The instance's event stream (`.socket2.sock`), one `NAME>>DATA` line
+    /// per event, in non-blocking mode so a poll loop can include its fd.
+    pub fn events(&self) -> Result<UnixStream> {
+        let stream =
+            UnixStream::connect(self.socket.with_file_name(".socket2.sock")).map_err(fail)?;
+        stream.set_nonblocking(true).map_err(fail)?;
+        Ok(stream)
+    }
     pub fn request(&self, command: &str) -> Result<String> {
         let mut stream = UnixStream::connect(&self.socket).map_err(fail)?;
         stream.set_read_timeout(Some(self.timeout)).map_err(fail)?;
@@ -259,6 +267,55 @@ pub fn is_on_active_workspace(client: &Client, monitors: &[Monitor]) -> bool {
         })
 }
 
+/// Where a window sits in Hyprland's render order: tiled windows first, then
+/// maximized, floating, pinned and fullscreen windows. Within a tier the
+/// `clients` list order is the stacking order, bottom first.
+fn stacking_tier(client: &Client) -> u8 {
+    match (client.fullscreen, client.pinned, client.floating) {
+        (2, _, _) => 4,
+        (_, true, _) => 3,
+        (_, _, true) => 2,
+        (1, _, _) => 1,
+        _ => 0,
+    }
+}
+
+/// What covers a window on screen, in Hyprland's render order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stacking {
+    /// Another window is fullscreen on the target's workspace.
+    Covered,
+    /// Rectangles of the visible windows rendered above the target.
+    Above(Vec<Rect>),
+}
+
+/// The visible windows rendered above `target`, so an overlay attached to it
+/// can hide under them the way a window-level attachment would. `clients` is
+/// the `hyprctl clients` list in its original order.
+pub fn stacking_above(target: &Client, clients: &[Client], monitors: &[Monitor]) -> Stacking {
+    let tier = stacking_tier(target);
+    let index = clients.iter().position(|c| c.address == target.address);
+    let mut above = vec![];
+    for (i, client) in clients.iter().enumerate() {
+        if client.address == target.address
+            || !client.mapped
+            || client.hidden
+            || client.monitor != target.monitor
+            || !is_on_active_workspace(client, monitors)
+        {
+            continue;
+        }
+        if client.fullscreen == 2 && client.workspace.id == target.workspace.id {
+            return Stacking::Covered;
+        }
+        let other = stacking_tier(client);
+        if other > tier || (other == tier && index.is_some_and(|t| i > t)) {
+            above.push(client.rect());
+        }
+    }
+    Stacking::Above(above)
+}
+
 /// Quotes arbitrary text as a Lua string literal.
 pub fn lua_string(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
@@ -281,6 +338,76 @@ pub fn lua_string(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn client(address: &str, at: [i64; 2], floating: bool) -> Client {
+        Client {
+            address: address.into(),
+            mapped: true,
+            at,
+            size: [100, 100],
+            workspace: Workspace {
+                id: 2,
+                name: "2".into(),
+            },
+            floating,
+            ..serde_json::from_str(r#"{"address":""}"#).unwrap()
+        }
+    }
+    fn monitor() -> Monitor {
+        serde_json::from_str(
+            r#"{"id":0,"name":"eDP-1","width":1920,"height":1200,"x":0,"y":0,"scale":1.0,"transform":0,
+            "focused":true,"activeWorkspace":{"id":2,"name":"2"},"specialWorkspace":{"id":0,"name":""}}"#,
+        )
+        .unwrap()
+    }
+    #[test]
+    fn stacking_follows_tiers_then_list_order() {
+        let tiled = client("0x1", [0, 0], false);
+        let float_low = client("0x2", [10, 10], true);
+        let float_high = client("0x3", [20, 20], true);
+        let hidden = Client {
+            hidden: true,
+            ..client("0x4", [30, 30], true)
+        };
+        let elsewhere = Client {
+            workspace: Workspace {
+                id: 5,
+                name: "5".into(),
+            },
+            ..client("0x5", [40, 40], true)
+        };
+        let clients = [
+            float_high.clone(),
+            tiled.clone(),
+            float_low.clone(),
+            hidden,
+            elsewhere,
+        ];
+        let monitors = [monitor()];
+        assert_eq!(
+            stacking_above(&tiled, &clients, &monitors),
+            Stacking::Above(vec![float_high.rect(), float_low.rect()])
+        );
+        assert_eq!(
+            stacking_above(&float_high, &clients, &monitors),
+            Stacking::Above(vec![float_low.rect()])
+        );
+        assert_eq!(
+            stacking_above(&float_low, &clients, &monitors),
+            Stacking::Above(vec![])
+        );
+        let fullscreen = Client {
+            fullscreen: 2,
+            ..client("0x6", [0, 0], false)
+        };
+        assert_eq!(
+            stacking_above(&tiled, &[tiled.clone(), fullscreen.clone()], &monitors),
+            Stacking::Covered
+        );
+        assert_eq!(
+            stacking_above(&fullscreen, &[tiled.clone(), fullscreen.clone()], &monitors),
+            Stacking::Above(vec![])
+        );
+    }
     #[test]
     fn parses_client_and_monitor_records() {
         let clients: Vec<Client> = serde_json::from_str(

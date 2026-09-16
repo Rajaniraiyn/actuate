@@ -956,8 +956,26 @@ impl LinuxSession {
                     None => self.capture()?.revision(&source)?,
                 };
                 let local = mapping.pixel_to_global(point, &revision)?;
-                let (global, window) = match window {
-                    Some(client) => {
+                let (global, window) = match (window, x11_window) {
+                    // An X window is still a compositor client: it scopes the
+                    // soft cursor and the visibility check, and X coordinates
+                    // already map onto the desktop.
+                    (None, Some(window_id)) => {
+                        let client = self.x11()?.window(window_id).ok().and_then(|record| {
+                            let hypr = self.hypr.as_ref()?;
+                            hypr.client_for(
+                                i64::from(record.pid?),
+                                record.title.as_deref().unwrap_or(""),
+                            )
+                            .ok()
+                            .flatten()
+                        });
+                        if let Some(client) = &client {
+                            self.require_visible(client)?;
+                        }
+                        (local, client)
+                    }
+                    (Some(client), _) => {
                         // Window captures map pixels onto the window's current position.
                         let current = self
                             .hypr()?
@@ -972,7 +990,7 @@ impl LinuxSession {
                         self.require_visible(&current)?;
                         (current.rect().local_to_global(local)?, Some(current))
                     }
-                    None => (local, None),
+                    (None, None) => (local, None),
                 };
                 match mode {
                     ClickMode::Global => self

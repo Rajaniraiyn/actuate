@@ -230,6 +230,29 @@ The final suite after the cleanup pass: 63 core, 11 Linux, 9 overlay, 3 composit
 section on a run with the fixture workspace active, including the compositor-seat pointer
 click that moved the shared cursor onto the button and incremented the counter.
 
+### Real applications, 2026-09-16
+
+`tests/linux_apps_demo.py` drove two installed applications through one long-lived
+`UNIMATION_SOFT_CURSOR=1 unimation session --json` on the fixture workspace while the
+user worked on another workspace with the keyboard and mouse; nothing touched the seat.
+
+- Calculator: `omacalc` (Qt Quick under Xwayland) registers an accessible application
+  but exposes no children even with `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`, so it was
+  driven by `click_image` on `x11_window` captures over the X11 route. Eight XTest
+  clicks (`AC 2 + 3 =`, then `* 8 =`) produced `5` and `40` in window captures, each
+  click recaptured first because a dispatched click advances the epoch, while
+  `hyprctl cursorpos` never moved. An X window capture now resolves its Hyprland client
+  so the soft cursor is window-scoped and the workspace guard still applies.
+- Terminal: a Ghostty window titled `UnimationTerminal` exposes a frame and panels but
+  no text node. `echo unimation-ok` plus Return sent as `hyprland_shortcut` keys to the
+  frame printed the command and its output in a toplevel capture, and
+  `hyprctl activewindow` stayed on the user's browser on another workspace throughout.
+- Soft cursor: an output capture showed the glyph on the calculator's `=` key after the
+  last click; while the user's workspace was active `hyprctl layers` reported the surface
+  parked at -96,-96, and the user moved the floating calculator during the run without
+  the glyph detaching. `capture` refuses to overwrite an existing path.
+- The idle session with the cursor shown used about 1.5% of one core.
+
 ### Known limits
 
 - Hyprland exposes one seat and no `ext-transient-seat`; the virtual pointer moves the
@@ -240,6 +263,12 @@ click that moved the shared cursor onto the button and incremented the counter.
   motion before pressing.
 - `hit_test` and window-targeted clicks depend on Hyprland window records; other
   compositors get window-relative bounds only.
-- Overlay-layer surfaces are never occluded, unlike the macOS attachment.
+- Layer surfaces cannot join the window stack, so window scope emulates the macOS
+  attachment: `compositor::hyprland::stacking_above` derives the windows above the
+  target from Hyprland's tiers (tiled, maximized, floating, pinned, fullscreen) and
+  client order and the renderer cuts the glyph away under them, and the Hyprland event
+  socket triggers geometry refreshes. Unit tests cover the tiering and the cut; the
+  covered-glyph case was not observed live because it needs the fixture workspace shown.
+  Layer-shell surfaces of other clients (bars, launchers) are not modelled.
 - Only one output and one scale were tested live; mixed-scale layouts rely on the
   per-monitor conversion without live evidence.
