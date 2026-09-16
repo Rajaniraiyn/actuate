@@ -2,7 +2,7 @@
 
 The vertex and tangent coordinates in `src/shape.rs` are adapted from
 [Cua's default cursor generator](https://github.com/trycua/cua/blob/fc188250b4ca8549b8e61f937fdb1fb560770e86/libs/cua-driver/rust/crates/cursor-overlay/assets/build_default_theme.py),
-`CURSOR_PATH`. Unimation retains the outline, scales it to logical points, and
+`CURSOR_PATH`. Actuate retains the outline, scales it to logical points, and
 anchors its rounded tip to the requested coordinate. It uses its own neutral
 fill, local shadow and click-ring renderer.
 

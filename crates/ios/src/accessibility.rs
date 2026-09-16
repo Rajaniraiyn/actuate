@@ -2,6 +2,10 @@
 //! Based on the API behavior documented by DioxusLabs/accessibility-cli's
 //! accessibility-ios-sys reader and dispatcher. No host keyboard input is sent.
 #![allow(unsafe_op_in_unsafe_fn)]
+use actuate::{
+    Effect, ElementRef, NativeError, Node, Receipt, Result, SemanticAction, SemanticActions,
+    Snapshot,
+};
 use block2::RcBlock;
 use objc2::{
     ClassType, msg_send,
@@ -21,10 +25,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
-};
-use unimation::{
-    Effect, ElementRef, NativeError, Node, Receipt, Result, SemanticAction, SemanticActions,
-    Snapshot,
 };
 fn error(code: &str, message: impl Into<String>, effect: Effect) -> NativeError {
     NativeError {
@@ -155,7 +155,7 @@ unsafe extern "C-unwind" fn parent(_: &AnyObject, _: Sel, _: *mut AnyObject) -> 
 fn dispatcher() -> usize {
     static INSTANCE: OnceLock<usize> = OnceLock::new();
     *INSTANCE.get_or_init(|| unsafe {
-        let mut b = ClassBuilder::new(c"UnimationSimulatorAXDelegate", NSObject::class())
+        let mut b = ClassBuilder::new(c"ActuateSimulatorAXDelegate", NSObject::class())
             .expect("unique native class");
         b.add_method(
             sel!(accessibilityTranslationDelegateBridgeCallbackWithToken:),
@@ -277,7 +277,7 @@ impl SimulatorAccessibility {
             require(p, sel!(setSupportsDelegateTokens:))?;
             require(p, sel!(setBridgeTokenDelegate:))?;
             let token = NSUUID::new().UUIDString().to_string();
-            let queue = dispatch_queue_create(c"unimation.simulator.ax".as_ptr(), std::ptr::null());
+            let queue = dispatch_queue_create(c"actuate.simulator.ax".as_ptr(), std::ptr::null());
             let timed_out = Arc::new(AtomicBool::new(false));
             routes().lock().unwrap().insert(
                 token.clone(),
@@ -711,12 +711,12 @@ pub enum SimulatorScope {
     Application { pid: i32 },
     Point { x: f64, y: f64 },
 }
-impl unimation::ObserveScope for SimulatorAccessibility {
+impl actuate::ObserveScope for SimulatorAccessibility {
     type Scope = SimulatorScope;
     fn observe_scope(
         &mut self,
         scope: Self::Scope,
-        budget: unimation::ObservationBudget,
+        budget: actuate::ObservationBudget,
     ) -> Result<Snapshot> {
         self.observe_selected(scope, budget.max_nodes, budget.max_depth)
     }
@@ -754,7 +754,7 @@ mod tests {
         let failure = unsafe {
             require(
                 Retained::as_ptr(&object) as *mut _,
-                sel!(unimationAbsentCapability),
+                sel!(actuateAbsentCapability),
             )
         }
         .unwrap_err();

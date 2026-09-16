@@ -1,9 +1,9 @@
 """Live Linux validation against the disposable GTK4 fixture on Hyprland.
 
-Launch the fixtures first (see docs/linux.md); this script never focuses,
+Launch the fixtures first (see _specs/linux.md); this script never focuses,
 raises or moves windows and only dispatches global input when the fixture's
-workspace is the active one. Set UNIMATION_FIXTURE_LOG and, for the X11
-fixture, UNIMATION_FIXTURE_X11_LOG to the log files the fixtures append to.
+workspace is the active one. Set ACTUATE_FIXTURE_LOG and, for the X11
+fixture, ACTUATE_FIXTURE_X11_LOG to the log files the fixtures append to.
 """
 import json
 import os
@@ -13,9 +13,9 @@ import sys
 import tempfile
 import time
 
-BIN = 'target/debug/unimation'
-LOG = os.environ.get('UNIMATION_FIXTURE_LOG')
-X11_LOG = os.environ.get('UNIMATION_FIXTURE_X11_LOG')
+BIN = 'target/debug/actuate'
+LOG = os.environ.get('ACTUATE_FIXTURE_LOG')
+X11_LOG = os.environ.get('ACTUATE_FIXTURE_X11_LOG')
 
 
 class Session:
@@ -80,7 +80,7 @@ def value(node, key):
 def fixture_clients():
     # Xwayland reports the interpreter name as the class; match the title there.
     return [c for c in hyprctl('clients')
-            if c['class'].startswith('dev.unimation.fixture') or (c['xwayland'] and c['title'].startswith('Unimation Fixture'))]
+            if c['class'].startswith('dev.actuate.fixture') or (c['xwayland'] and c['title'].startswith('Actuate Fixture'))]
 
 
 def test_protocol(s):
@@ -143,7 +143,7 @@ def test_semantic(s, client, log):
     snap = s.result(op='snapshot', request={'pid': pid}, format='json')
     nodes = snap['nodes']
     assert snap['traversal_complete'], snap['issues']
-    frame = find(nodes, 'frame', 'Unimation Fixture')
+    frame = find(nodes, 'frame', 'Actuate Fixture')
     bounds = frame['attributes']['bounds']
     assert bounds['x'] == client['at'][0] and bounds['y'] == client['at'][1], (bounds, client['at'])
     assert value(frame, 'bounds_source').startswith('window_extents_plus_hyprland'), frame['attributes'].get('bounds_source')
@@ -258,17 +258,17 @@ def test_overlay(s):
     time.sleep(0.3)
     status = s.result(op='cursor_state')
     assert status['overlay_running'] is True and status['overlay_error'] is None, status
-    assert 'unimation-cursor' in layer_namespaces(), layer_namespaces()
+    assert 'actuate-cursor' in layer_namespaces(), layer_namespaces()
     s.result(op='cursor_overlay', action={'kind': 'stop'})
     time.sleep(0.3)
-    assert 'unimation-cursor' not in layer_namespaces(), layer_namespaces()
-    helper = os.path.abspath('target/debug/unimation-overlay')
+    assert 'actuate-cursor' not in layer_namespaces(), layer_namespaces()
+    helper = os.path.abspath('target/debug/actuate-overlay')
     state = s.result(op='cursor_overlay', action={'kind': 'start', 'executable': helper})
     assert state['overlay_running'] is True, state
     time.sleep(0.5)
     status = s.result(op='cursor_state')
     assert status['overlay_running'] is True and status['overlay_pid'] not in (None, os.getpid()), status
-    assert 'unimation-cursor' in layer_namespaces(), layer_namespaces()
+    assert 'actuate-cursor' in layer_namespaces(), layer_namespaces()
     print('PASS overlay: in-process and helper-process layer-shell renderers registered compositor layer surfaces without input side effects')
 
 
@@ -276,7 +276,7 @@ def cursor_layer():
     for monitor in hyprctl('layers').values():
         for level in monitor.get('levels', {}).values():
             for layer in level:
-                if layer.get('namespace') == 'unimation-cursor':
+                if layer.get('namespace') == 'actuate-cursor':
                     return layer
     return None
 
@@ -297,8 +297,8 @@ def assert_cursor_followed(client, point):
 def test_global_if_active(s, client, nodes, log, frame_id):
     active = hyprctl('activeworkspace')['id']
     button = find(nodes, 'push button', 'Increment')
-    if os.environ.get('UNIMATION_ALLOW_GLOBAL_INPUT') != '1':
-        print('SKIP global pointer: set UNIMATION_ALLOW_GLOBAL_INPUT=1 to move the shared cursor when the fixture workspace is active')
+    if os.environ.get('ACTUATE_ALLOW_GLOBAL_INPUT') != '1':
+        print('SKIP global pointer: set ACTUATE_ALLOW_GLOBAL_INPUT=1 to move the shared cursor when the fixture workspace is active')
         return
     if active != client['workspace']['id']:
         reply = s.call(op='click', target=button['reference'], mode='global')
@@ -319,7 +319,7 @@ def test_global_if_active(s, client, nodes, log, frame_id):
 def test_x11(s):
     clients = [c for c in fixture_clients() if c['xwayland']]
     if not clients or not X11_LOG:
-        print('SKIP x11: no Xwayland fixture running (launch fixture.py with GDK_BACKEND=x11 and UNIMATION_FIXTURE_ID)')
+        print('SKIP x11: no Xwayland fixture running (launch fixture.py with GDK_BACKEND=x11 and ACTUATE_FIXTURE_ID)')
         return
     client = clients[0]
     s.result(op='input_route', route='x11')
@@ -343,7 +343,7 @@ def test_x11(s):
     windows = s.result(op='windows')['x11']
     assert any(w['pid'] == client['pid'] for w in windows), windows
     x11_window = next(w for w in windows if w['pid'] == client['pid'])
-    with tempfile.TemporaryDirectory(prefix='unimation-x11-') as tmp:
+    with tempfile.TemporaryDirectory(prefix='actuate-x11-') as tmp:
         frame = s.result(op='capture', source={'kind': 'x11_window', 'window_id': x11_window['window_id']}, path=os.path.join(tmp, 'x11.png'))
         assert frame['frame']['route'] == 'linux.x11.get_image', frame
     s.result(op='input_route', route='wayland')
@@ -353,7 +353,7 @@ def test_x11(s):
 def main():
     clients = [c for c in fixture_clients() if not c['xwayland']]
     if not clients or not LOG:
-        sys.exit('Launch native/linux/fixture.py with UNIMATION_FIXTURE_LOG first')
+        sys.exit('Launch native/linux/fixture.py with ACTUATE_FIXTURE_LOG first')
     client = clients[0]
     s = Session()
     try:
@@ -363,7 +363,7 @@ def main():
         test_hyprland_shortcut(s, client, nodes, LOG)
         status = s.result(op='cursor_state')
         assert status['overlay_running'] is True and status['overlay_error'] is None, status
-        with tempfile.TemporaryDirectory(prefix='unimation-linux-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='actuate-linux-') as tmp:
             frame_id = test_capture(s, client, tmp)
             test_global_if_active(s, client, nodes, LOG, frame_id)
         test_x11(s)

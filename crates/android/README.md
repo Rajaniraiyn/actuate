@@ -29,7 +29,7 @@ UHID pointer input is a separate persistent capability; relative motion must not
 be advertised as exact screen coordinates. No APK is installed automatically.
 
 The remaining local DroidMux patches cover protocol races and wireless trust/QR
-handling. See the patch records and [source audit](../../docs/android-reference-audit.md).
+handling. See the patch records and [source audit](../../_specs/android-reference-audit.md).
 Plain TCP is the legacy ADB route; Android wireless debugging uses paired TLS.
 
 ## Validation
@@ -38,4 +38,4 @@ Unit tests cover typed validation, quoting, output bounds and uncertain exit sta
 Live device findings are recorded separately; USB and QR scanning need their own
 hardware validation. No simulator test establishes physical-device behavior.
 
-See [live validation](../../docs/android-validation.md) for observed behavior and remaining gaps.
+See [live validation](../../_specs/android-validation.md) for observed behavior and remaining gaps.

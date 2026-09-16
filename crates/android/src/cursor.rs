@@ -6,10 +6,10 @@
 //! This adapter deliberately supports only unrotated, unscaled full displays.
 //! Other display mappings must be implemented explicitly rather than guessed.
 use crate::{CommandTransport, LimitedOutput, error};
+use actuate::{Effect, Result};
 use prost::Message;
 use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
-use unimation::{Effect, Result};
 
 const LIMIT: usize = 16 * 1024 * 1024;
 const MAGIC: u64 = 0x454341525452594c;
@@ -68,7 +68,7 @@ pub fn observe<T: CommandTransport>(transport: &mut T) -> Result<CursorObservati
     parse_surface_flinger(&out.bytes)
 }
 
-fn invalid(message: impl ToString) -> unimation::NativeError {
+fn invalid(message: impl ToString) -> actuate::NativeError {
     error("android_cursor_geometry", message, Effect::None)
 }
 

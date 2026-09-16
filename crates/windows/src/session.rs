@@ -1,8 +1,8 @@
 use super::{Accessibility, GlobalInput};
+use actuate::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use unimation::*;
 
 /// Provider metadata describes the injected implementation, not every Windows app.
 #[derive(Debug, Serialize)]
@@ -420,7 +420,7 @@ impl WindowsSession {
                     .ok_or_else(|| {
                         super::error("unknown_revision", "After revision not retained")
                     })?;
-                Ok(json!(unimation::diff::diff_snapshots(before, after)?))
+                Ok(json!(actuate::diff::diff_snapshots(before, after)?))
             }
         }
     }

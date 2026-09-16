@@ -5,15 +5,15 @@
 //! references and reads native properties without renaming them. Toolkits
 //! that gate accessibility on the bus `IsEnabled` flag (Chromium, Electron,
 //! Qt) stay invisible until that flag is set explicitly.
+use actuate::{
+    Discover, Effect, ElementRef, NativeError, Node, ObservationBudget, ObserveScope, Point,
+    Receipt, Result, SemanticAction, SemanticActions, Snapshot, geometry::Rect, schema::ATSPI,
+};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     future::Future,
     time::Duration,
-};
-use unimation::{
-    Discover, Effect, ElementRef, NativeError, Node, ObservationBudget, ObserveScope, Point,
-    Receipt, Result, SemanticAction, SemanticActions, Snapshot, geometry::Rect, schema::ATSPI,
 };
 use zbus::{Connection, zvariant::OwnedObjectPath};
 use zvariant::{OwnedValue, Value as ZValue};
@@ -954,7 +954,7 @@ impl AtSpi {
             let role = node
                 .attributes
                 .get("role")
-                .and_then(unimation::values::string)
+                .and_then(actuate::values::string)
                 .unwrap_or("")
                 .to_owned();
             if origin.is_none()
@@ -964,7 +964,7 @@ impl AtSpi {
                 let title = node
                     .attributes
                     .get("name")
-                    .and_then(unimation::values::string)
+                    .and_then(actuate::values::string)
                     .unwrap_or("");
                 origin = root_pid.and_then(|pid| origins.origin(pid, title));
                 // The toplevel's own global bounds come from the compositor frame.
@@ -1278,8 +1278,8 @@ impl ObserveScope for AtSpi {
         self.observe_subtree(&root, budget)
     }
 }
-impl unimation::Observe for AtSpi {
-    fn observe(&mut self, request: unimation::ObserveRequest) -> Result<Snapshot> {
+impl actuate::Observe for AtSpi {
+    fn observe(&mut self, request: actuate::ObserveRequest) -> Result<Snapshot> {
         self.observe_scope(request.pid, request.budget())
     }
 }

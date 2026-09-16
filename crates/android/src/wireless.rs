@@ -1,5 +1,6 @@
 //! Direct Android wireless pairing and TLS transport. No adb executable or server.
 use crate::connection::Runtime;
+use actuate::{Effect, NativeError, Result};
 use async_trait::async_trait;
 use droidmux::pairing::{
     self, CredentialStore, CredentialStoreError, StoredHostCredential, StoredPairedDevice,
@@ -12,7 +13,6 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use unimation::{Effect, NativeError, Result};
 
 fn fail(code: &str, message: impl ToString, effect: Effect) -> NativeError {
     NativeError {
@@ -226,7 +226,7 @@ impl WirelessHost {
                     host: endpoint.ip().to_string(),
                     port: endpoint.port(),
                     pairing_code: pairing::SecretString::from(code.to_owned()),
-                    client_name: "unimation".into(),
+                    client_name: "actuate".into(),
                 },
                 &self.store,
             )
@@ -331,7 +331,7 @@ mod tests {
     use super::*;
     fn store() -> FileStore {
         let path = std::env::temp_dir().join(format!(
-            "unimation-wireless-{}-{}",
+            "actuate-wireless-{}-{}",
             std::process::id(),
             rand::random::<u64>()
         ));

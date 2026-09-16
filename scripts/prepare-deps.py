@@ -15,7 +15,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "target" / "patched-deps"
 LIMIT = 32 * 1024 * 1024
-STAMP = ".unimation-source.json"
+STAMP = ".actuate-source.json"
 
 
 def digest(data):

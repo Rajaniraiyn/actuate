@@ -1,6 +1,6 @@
 //! Read-only AT-SPI probe: lists applications, then renders one tree.
 //! Usage: atspi_probe [pid] [max_nodes]
-use unimation::{Discover, ObservationBudget, ObserveScope, presentation};
+use actuate::{Discover, ObservationBudget, ObserveScope, presentation};
 fn main() {
     let mut atspi = linux::AtSpi::connect().expect("accessibility bus");
     let discovered = atspi.discover().expect("discover");

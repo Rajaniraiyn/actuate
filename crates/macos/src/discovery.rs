@@ -1,9 +1,9 @@
 //! Stateless process enumeration and an optional legacy front-process probe.
 //! Avoid NSWorkspace's notification-driven caches in a synchronous library host.
 use crate::error;
+use actuate::{Effect, Result};
 use objc2::rc::Retained;
 use objc2_app_kit::NSRunningApplication;
-use unimation::{Effect, Result};
 
 pub(crate) fn applications() -> Result<Vec<Retained<NSRunningApplication>>> {
     // SAFETY: libproc allows a null buffer for a size query.

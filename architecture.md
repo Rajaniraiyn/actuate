@@ -1,6 +1,6 @@
-# Unimation architecture
+# Actuate architecture
 
-Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, compact text and JSON presentation adapters, viewport hints, live actionability evidence, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. Linux has AT-SPI2 observation and actions, Wayland and X11 input routes, compositor capture, Hyprland window discovery and a layer-shell cursor renderer; see [the Linux guide](docs/linux.md). See [README](README.md), [backend tasks](docs/backends.md), [presentation and viewport behavior](docs/presentation.md), [SkyLight details](docs/skylight.md), and [validation](docs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
+Implementation status, 2026-09-16: the Cargo workspace implements direct Rust macOS AX, Quartz and SkyLight providers, ScreenCaptureKit still capture with explicit executable alternative, typed session routing, retained snapshot queries/diffs, compact text and JSON presentation adapters, viewport hints, live actionability evidence, and frame coordinate validation. An optional Rust AppKit cursor overlay is a separate visual process. Linux has AT-SPI2 observation and actions, Wayland and X11 input routes, compositor capture, Hyprland window discovery and a layer-shell cursor renderer; see [the Linux guide](_specs/linux.md). See [README](README.md), [backend tasks](_specs/backends.md), [presentation and viewport behavior](_specs/presentation.md), [SkyLight details](_specs/skylight.md), and [validation](_specs/validation.md) for implemented behavior and tested limits. The sections below remain the broader target architecture.
 
 Status: working design. Command names and Rust contracts below describe the target architecture unless identified as implemented in the linked implementation documentation. Research evidence alone does not establish runtime support.
 
@@ -8,7 +8,7 @@ Reading guide: [target and reference model](#3-target-model-trees-plus-relations
 
 ## 1. Purpose and scope
 
-Unimation gives agents a consistent interface for operating applications, browsers, mobile devices, and operating-system UI. The core is a Rust library with independently composable providers and an execution runtime. Commands follow the useful behavior of agent-browser: compact snapshots, references, locators, clicks, text entry, scrolling, waits, and diffs.
+Actuate gives agents a consistent interface for operating applications, browsers, mobile devices, and operating-system UI. The core is a Rust library with independently composable providers and an execution runtime. Commands follow the useful behavior of agent-browser: compact snapshots, references, locators, clicks, text entry, scrolling, waits, and diffs.
 
 The primary consumer is an agent. Accessibility supplies semantics and some action routes, while pointer, keyboard, touch, and platform-specific delivery provide the wider interaction model. An agent must be able to operate a canvas, an embedded editor, a native file panel, and shell UI as part of the same workflow.
 
@@ -165,7 +165,7 @@ If the framework destroys and recreates the textbox, `@e12` becomes replaced and
 
 An unchanged reference does not imply that acting from an old observation is valid. Require the relevant target state to be revalidated before dispatch. Track both runtime mutation epochs and observed external-change revisions.
 
-Runtime epochs detect competing Unimation writes. They cannot detect every human, application, or compositor change. Revalidate identity, geometry, focus, blocking, and operation-specific preconditions at the final dispatch boundary. A small check-to-use race remains on APIs without atomic validation and dispatch; report this limitation rather than implying transactions isolate the desktop.
+Runtime epochs detect competing Actuate writes. They cannot detect every human, application, or compositor change. Revalidate identity, geometry, focus, blocking, and operation-specific preconditions at the final dispatch boundary. A small check-to-use race remains on APIs without atomic validation and dispatch; report this limitation rather than implying transactions isolate the desktop.
 
 ### Locator contract
 
@@ -291,7 +291,7 @@ Aside describes CDP wrappers, browser changes for background agent tabs, a viewp
 
 ### Connection ownership
 
-Distinguish attaching to an existing browser, launching an owned browser, profile-state copying, persistent automation profiles, and extension-mediated access. Closing Unimation must not terminate externally owned browsers or unrelated tabs. A target that disappears stays closed until the caller deliberately binds another target.
+Distinguish attaching to an existing browser, launching an owned browser, profile-state copying, persistent automation profiles, and extension-mediated access. Closing Actuate must not terminate externally owned browsers or unrelated tabs. A target that disappears stays closed until the caller deliberately binds another target.
 
 Cross-provider duplicate nodes may be linked when identity is established. Otherwise retain source-qualified views and let the resolver choose one. Avoid guessing that overlapping AX and protocol nodes are identical.
 
@@ -334,7 +334,7 @@ A prepared operation stores command semantics version, arguments, exact referenc
 
 Keep presentation diffs, native property caches, locator plans, and prepared operations in separate caches. Their invalidation rules differ. Include locale when labels participate in a locator. A reusable plan saves resolution work; its previous result is never evidence of a new action's success.
 
-Stagehand's inspected cache client replays cached actions and can fall back after replay failure; its server-side cache-key implementation was not inspected. Unimation must record the completed sequence prefix and any uncertain step before fallback. Replaying a whole form submission after only its final observation failed can duplicate the submission. [Stagehand cache client](https://github.com/browserbase/stagehand/blob/f1c26a68d97004ef3091bbd6828d20cad2589fc3/packages/extension/services/cacheService.ts)
+Stagehand's inspected cache client replays cached actions and can fall back after replay failure; its server-side cache-key implementation was not inspected. Actuate must record the completed sequence prefix and any uncertain step before fallback. Replaying a whole form submission after only its final observation failed can duplicate the submission. [Stagehand cache client](https://github.com/browserbase/stagehand/blob/f1c26a68d97004ef3091bbd6828d20cad2589fc3/packages/extension/services/cacheService.ts)
 
 ## 10. Delivery, focus, and execution state
 
@@ -344,7 +344,7 @@ Represent independent limits for application activation, raising windows, keyboa
 
 Suggested presets are strict background, temporary foreground with conditional restoration, and explicit foreground. Invalid preset values fail validation. A best-effort route cannot claim strict background guarantees.
 
-Restoring focus after an action is different from never changing focus. A focus guard must not restore an old window over a newer user choice. Record the focus state established by Unimation and restore only if it still owns that state; otherwise report interruption or skipped restoration.
+Restoring focus after an action is different from never changing focus. A focus guard must not restore an old window over a newer user choice. Record the focus state established by Actuate and restore only if it still owns that state; otherwise report interruption or skipped restoration.
 
 A semantic operation can itself activate an app or open another window. Providers declare expected effects, and verification records observed effects. Pre-dispatch policy cannot guarantee an arbitrary application never changes focus.
 
@@ -386,7 +386,7 @@ OS input strategies include targeted CoreGraphics/SkyLight, UIA/MSAA and suitabl
 - Keep a drag on one route through release. Cross-process drag-and-drop may require OS drag infrastructure and cannot be assumed to work through PID-local events.
 - Resolve actionable regions, not just rectangle centers. Account for clipping, split controls, irregular targets, offscreen portions, and intercepting windows.
 - Hover can open UI and alter the target graph. Touch-only targets may not support meaningful hover.
-- Cancellation releases only input Unimation owns where the platform can distinguish it. Shared physical state may make perfect separation impossible; report cleanup limitations.
+- Cancellation releases only input Actuate owns where the platform can distinguish it. Shared physical state may make perfect separation impossible; report cleanup limitations.
 
 ### Text details
 
@@ -490,7 +490,7 @@ Window captures may omit menus, popovers, shadows, or separately owned dialogs. 
 
 A blank capture can mean minimized content, protected content, capture failure, or a valid blank window. Do not treat black pixels alone as proof of failure. Capturing must not automatically unminimize, raise, or switch Spaces; those are explicit preparation actions.
 
-Keep native-resolution source buffers separate from resized agent images. Use bounded overview images and detailed crops. Screenshots, tree annotations, and agent overlays must use the same recorded transform. Exclude Unimation's overlay from perception by default.
+Keep native-resolution source buffers separate from resized agent images. Use bounded overview images and detailed crops. Screenshots, tree annotations, and agent overlays must use the same recorded transform. Exclude Actuate's overlay from perception by default.
 
 Video is a timestamped observation stream with optional audio/transcript extensions. Playback controls use ordinary commands; understanding video contents is a separate observation capability. Apply backpressure and expose dropped frames. Media recording and image interpretation need not be required dependencies of basic input.
 
@@ -551,7 +551,7 @@ Windows UIA calls belong on a long-lived windowless MTA worker, with handler reg
 
 Use UIA cache requests to batch properties and patterns. Record cache completeness and whether a handle supports live calls. An optional UIA remote-operations provider can execute bounded observation logic within one provider process, with instruction budgets and continuation. It does not produce a desktop-wide atomic snapshot. [FlaUI cache requests](https://github.com/FlaUI/FlaUI/blob/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16/src/FlaUI.Core/CacheRequest.cs), [NVDA remote operations](https://github.com/nvaccess/nvda/blob/7419906db87c4dd505ab314f7581f9aea8595c06/source/UIAHandler/_remoteOps/readme.md)
 
-Coalesce event storms by event-specific rules. Preserve destruction and operation-result semantics, and emit an overflow boundary that triggers resynchronization. AT-SPI native property caches have their own invalidation; a new Unimation snapshot is not proof of fresh native data. Avoid slow synchronous reads in accessibility event callbacks. [NVDA event limiter](https://github.com/nvaccess/nvda/blob/7419906db87c4dd505ab314f7581f9aea8595c06/nvdaHelper/local/UIAEventLimiter/rateLimitedEventHandler.cpp), [AT-SPI cache API](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/class.Accessible.html)
+Coalesce event storms by event-specific rules. Preserve destruction and operation-result semantics, and emit an overflow boundary that triggers resynchronization. AT-SPI native property caches have their own invalidation; a new Actuate snapshot is not proof of fresh native data. Avoid slow synchronous reads in accessibility event callbacks. [NVDA event limiter](https://github.com/nvaccess/nvda/blob/7419906db87c4dd505ab314f7581f9aea8595c06/nvdaHelper/local/UIAEventLimiter/rateLimitedEventHandler.cpp), [AT-SPI cache API](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/class.Accessible.html)
 
 Track observation and takeover-monitor health. AX observers need a registered live run-loop source. Event taps can become disabled; secure input can prevent keyboard interception. Missing events under those conditions do not establish that the human is idle, or that every injection route is unavailable. [Apple AX observer lifecycle](https://developer.apple.com/documentation/applicationservices/1459139-axobservergetrunloopsource), [Hammerspoon event taps](https://github.com/Hammerspoon/hammerspoon/blob/23e387e2805a9890066366e0ac96c71b27f0cfd5/extensions/eventtap/libeventtap.m)
 
@@ -660,7 +660,7 @@ Projected diffs compare displayed fields for the same retained references. A nod
 
 For scrolling, observe the intended scroll container, apply a bounded route-specific scroll, observe it again, and compare the same scope. Track both content and geometry progress. An unchanged projection may mean no movement, repeated virtualized content, a hidden change or failed delivery; it does not prove end-of-list. Stop on a caller limit or verified terminal condition and retain uncertainty otherwise. The first implementation provides the component operations; automatic scroll-until orchestration and generalized clipping/occlusion providers remain separate work.
 
-Agent-browser's text snapshot flags and line-level diff inform the command presentation. Browser-use's enhanced snapshot code retains layout, scroll rectangles and paint order separately. These are useful inputs for a browser adapter, not a universal visibility contract for native applications. See [presentation design and sources](docs/presentation.md).
+Agent-browser's text snapshot flags and line-level diff inform the command presentation. Browser-use's enhanced snapshot code retains layout, scroll rectangles and paint order separately. These are useful inputs for a browser adapter, not a universal visibility contract for native applications. See [presentation design and sources](_specs/presentation.md).
 
 Page/app content is untrusted observation data. It must not become runtime configuration or permission authority. Keep secret field values and unrestricted text capture out of default logs; diagnostic recording is explicit and configurable.
 
@@ -751,26 +751,26 @@ For each new edge case, update the behavior contract, target or provider require
 
 ## 20. Research evidence
 
-Source inspection was performed against pinned repository commits. Only relevant modules were downloaded into a temporary research directory. No upstream implementation was copied into this repository, and no upstream native test suite was executed here. The rules above are Unimation design proposals informed by that inspection, not claims that every referenced project implements them.
+Source inspection was performed against pinned repository commits. Only relevant modules were downloaded into a temporary research directory. No upstream implementation was copied into this repository, and no upstream native test suite was executed here. The rules above are Actuate design proposals informed by that inspection, not claims that every referenced project implements them.
 
 The evidence below is selective. It records concrete mechanisms and the architectural consequence, rather than a repository-by-repository feature catalog.
 
 | Audited source | Finding and design consequence |
 |---|---|
-| [Agent-browser](https://github.com/vercel-labs/agent-browser/blob/8bbddb840c74d3c41b01d0b6804b059ba40de56e/cli/src/native/element.rs) | Caches backend IDs and frame context; stale resolution can fall back to role/name/ordinal. Unimation separates that locator behavior from exact-reference continuity. |
+| [Agent-browser](https://github.com/vercel-labs/agent-browser/blob/8bbddb840c74d3c41b01d0b6804b059ba40de56e/cli/src/native/element.rs) | Caches backend IDs and frame context; stale resolution can fall back to role/name/ordinal. Actuate separates that locator behavior from exact-reference continuity. |
 | [Agent-browser navigation](https://github.com/vercel-labs/agent-browser/blob/8bbddb840c74d3c41b01d0b6804b059ba40de56e/cli/src/native/actions.rs) | Document navigation clears references and active frame state. A public alias must carry session and document lifetime rather than relying on its short printed name. |
-| [Pi computer use](https://github.com/injaneity/pi-computer-use/blob/4b8dbd7eaa13328ab1a8a4b55d0be0b077de7d62/src/view.ts) | Reconciles wire references and structural paths before rendering successor diffs. Structural similarity is useful for presentation; Unimation requires stronger evidence for exact action identity. |
+| [Pi computer use](https://github.com/injaneity/pi-computer-use/blob/4b8dbd7eaa13328ab1a8a4b55d0be0b077de7d62/src/view.ts) | Reconciles wire references and structural paths before rendering successor diffs. Structural similarity is useful for presentation; Actuate requires stronger evidence for exact action identity. |
 | [Pi execution](https://github.com/injaneity/pi-computer-use/blob/4b8dbd7eaa13328ab1a8a4b55d0be0b077de7d62/src/bridge.ts) | Coordinates requests and resource scheduling. Shared native input and dependent steps need runtime ownership beyond individual tool calls. |
 | [Cua tokens](https://github.com/trycua/cua/blob/5fcd67326dd0406bca823e5488cf39f47491c869/libs/cua-driver/rust/crates/cua-driver-core/src/element_token.rs) | Uses snapshot-qualified element tokens and tests stale, mismatched-window, and bare-index rejection. Its latest snapshot invalidation is a different contract from stable cross-observation references. |
 | [Cua lifecycle](https://github.com/trycua/cua/blob/5fcd67326dd0406bca823e5488cf39f47491c869/libs/cua-driver/rust/crates/cua-driver-sdk/src/snapshot_lifecycle_tests.rs) | Tests native snapshot retirement on shutdown, cross-runtime isolation, cancellation, and eviction. Reference validity includes resource ownership and publication lifetime. |
 | [Cua macOS window scope](https://github.com/trycua/cua/blob/5fcd67326dd0406bca823e5488cf39f47491c869/libs/cua-driver/rust/crates/platform-macos/src/ax/window_scope.rs) | Distinguishes matched, unresolved, missing, and foreign-owned windows. Tests prevent returning a menu-bar-only tree for an unresolved requested window and cover file-panel ownership. |
 | [Cua Windows delivery](https://github.com/trycua/cua/blob/5fcd67326dd0406bca823e5488cf39f47491c869/libs/cua-driver/rust/crates/platform-windows/src/input/delivery.rs) | Classifies event families and known target-dependent message failures. Background and foreground routes are explicit; the source is empirical routing evidence, not a platform guarantee. |
 | [Open computer use input](https://github.com/opensymph/open-computer-use/blob/5b433b98019c18201a15d11e8c3cb0010879a3d8/packages/OpenComputerUseKit/Sources/OpenComputerUseKit/InputSimulation.swift) | Separates targeted, global, and SkyLight click paths. Scroll and drag use their own event construction, supporting independent action-provider boundaries. |
-| [Open computer use identity](https://github.com/opensymph/open-computer-use/blob/5b433b98019c18201a15d11e8c3cb0010879a3d8/apps/OpenComputerUseWindows/native_actions.go) | Attempts runtime-ID lookup before identifier/name plus control-type fallback. Such fallback can find a replacement, so Unimation exposes it as locator recovery rather than proven continuity. |
-| [Open computer use observation](https://github.com/opensymph/open-computer-use/blob/5b433b98019c18201a15d11e8c3cb0010879a3d8/packages/OpenComputerUseKit/Sources/OpenComputerUseKit/AccessibilitySnapshot.swift) | Includes application menu-bar data separately from the window tree and contains visibility-recovery paths. Unimation makes any raise/unminimize preparation explicit rather than hiding it in observation. |
+| [Open computer use identity](https://github.com/opensymph/open-computer-use/blob/5b433b98019c18201a15d11e8c3cb0010879a3d8/apps/OpenComputerUseWindows/native_actions.go) | Attempts runtime-ID lookup before identifier/name plus control-type fallback. Such fallback can find a replacement, so Actuate exposes it as locator recovery rather than proven continuity. |
+| [Open computer use observation](https://github.com/opensymph/open-computer-use/blob/5b433b98019c18201a15d11e8c3cb0010879a3d8/packages/OpenComputerUseKit/Sources/OpenComputerUseKit/AccessibilitySnapshot.swift) | Includes application menu-bar data separately from the window tree and contains visibility-recovery paths. Actuate makes any raise/unminimize preparation explicit rather than hiding it in observation. |
 | [Dioxus cache](https://github.com/DioxusLabs/accessibility-cli/blob/a8464024f84a0c59b769dc526555037e6227fce5/packages/accessibility-core/src/accessibility/cache.rs) | Uses generational slot-map keys and increments a snapshot version on clear. This prevents stale slot lookup but does not establish logical identity across cache rebuilds. |
 | [Dioxus locators](https://github.com/DioxusLabs/accessibility-cli/blob/a8464024f84a0c59b769dc526555037e6227fce5/packages/accessibility-core/src/api/locator.rs) | Separates polling for a target from performing an operation. Fresh resolution and retrying a mutation require different contracts. |
-| [nut.js providers](https://github.com/nut-tree/nut.js/blob/e413fa1f19a19c4631812e4e1eaf47aa732b5cbe/core/provider-interfaces/lib/provider-registry.interface.ts) | Registers pointer, keyboard, screen, window, clipboard, and inspection providers separately. Unimation adds shared target domains, input-state ownership, and route-specific effects. |
+| [nut.js providers](https://github.com/nut-tree/nut.js/blob/e413fa1f19a19c4631812e4e1eaf47aa732b5cbe/core/provider-interfaces/lib/provider-registry.interface.ts) | Registers pointer, keyboard, screen, window, clipboard, and inspection providers separately. Actuate adds shared target domains, input-state ownership, and route-specific effects. |
 | [AccessKit schema](https://github.com/AccessKit/accesskit/blob/c978212671e028175113ea92b987e62ed4be532d/accesskit/src/lib.rs) | Defines roles, actions, node IDs, tree updates, and action requests. Evaluate semantic reuse while keeping external-reader identity and runtime mechanics separate. |
 
 ### Additional review coverage and evidence limits
@@ -818,14 +818,14 @@ Control Center sliders on the validation host rejected AXValue setters but accep
 advertised increment/decrement actions. Providers must expose both routes and preserve
 unsupported results without silently changing delivery. Panel transitions also need
 bounded observation of expected controls rather than assuming a dispatch receipt means
-the next accessibility snapshot is settled. See `docs/validation.md` for measured results.
+the next accessibility snapshot is settled. See `_specs/validation.md` for measured results.
 
 
 ### iOS Simulator implementation and workspace names
 
-The workspace packages and directories are now `android`, `cli`, `unimation`, `ios`,
+The workspace packages and directories are now `android`, `cli`, `actuate`, `ios`,
 `linux`, `macos`, `overlay`, and `windows`, with publishing disabled. The portable traits
-live in `unimation`; the executable remains `unimation` from package `cli`.
+live in `actuate`; the executable remains `actuate` from package `cli`.
 
 One macOS-hosted `ios` backend covers iPhone and iPad simulators through CoreSimulator
 and AccessibilityPlatformTranslation. Device identity consists of an explicit device-set
@@ -836,14 +836,14 @@ semantic actions implement the portable trait without depending on host pointer 
 The initial implementation exposes frontmost-app observation, retained raw snapshots,
 compact views, native queries/diffs, advertised semantic actions, app launch and screenshots.
 HID input, full property enumeration, scene/display roots, validated pixel mapping and
-physical devices remain distinct capabilities to implement. See `docs/ios.md` for API
+physical devices remain distinct capabilities to implement. See `_specs/ios.md` for API
 contracts, ownership, deadlines and limitations. Disposable test device sets reuse an
 installed runtime and are shut down and removed after validation.
 
 
 ### Typed composition and iOS ownership update
 
-Portable `Backend<O, I, C, V, A>` composition now lives in `unimation`. Observation and
+Portable `Backend<O, I, C, V, A>` composition now lives in `actuate`. Observation and
 semantic actions share their native reference owner; input, capture, cursor rendering
 and app lifecycle are injected independently. Missing providers implement no capability
 traits. `ObserveScope` leaves scope identity to the provider, and mobile touch, USB HID
@@ -860,14 +860,14 @@ is a macOS Simulator host, not guest code targeting iOS. Temporary simulator lif
 remains a test-script responsibility. The overlay crate owns platform-neutral protocol,
 animation and controller APIs, with AppKit rendering and explicit unsupported modules
 for the other platforms. Native mouse input is independent from visual cursor rendering.
-See `docs/composition.md` and `docs/ios.md` for the current contracts and tested limits.
+See `_specs/composition.md` and `_specs/ios.md` for the current contracts and tested limits.
 
 ## CLI provider configuration and typed choices
 
 The common command grammar selects a provider through `--provider` or
-`UNIMATION_PROVIDER`, with explicit arguments taking precedence. `native` resolves
-to the host implementation. Device selection uses `--device` / `UNIMATION_DEVICE`
-and `--device-set` / `UNIMATION_DEVICE_SET`. There is no implicit first-simulator
+`ACTUATE_PROVIDER`, with explicit arguments taking precedence. `native` resolves
+to the host implementation. Device selection uses `--device` / `ACTUATE_DEVICE`
+and `--device-set` / `ACTUATE_DEVICE_SET`. There is no implicit first-simulator
 selection. Platform-specific resource discovery is nested under `ios simulators`.
 
 The CLI uses usage-rs value enums for closed choices and exhaustive Rust matches
@@ -875,7 +875,7 @@ for dispatch. Environment resolution, validation, help, completion scripts and t
 exported command specification come from usage-rs. Installed resources do not
 change the grammar. Native APIs and persistent sessions remain in their provider
 crates; CLI routing maps shared arguments to typed provider requests. See
-[CLI configuration](docs/cli.md) for supported commands and current limitations.
+[CLI configuration](_specs/cli.md) for supported commands and current limitations.
 
 
 CLI data output defaults to plain text, including pipes. A single global format
@@ -887,8 +887,8 @@ so usage-rs omits them from parsing, help and completions on other hosts.
 
 ## Apple ecosystem reuse and discovery boundaries
 
-The [Apple crate audit](docs/apple-crate-audit.md) and
-[automation source audit](docs/automation-reference-audit.md) record pinned source,
+The [Apple crate audit](_specs/apple-crate-audit.md) and
+[automation source audit](_specs/automation-reference-audit.md) record pinned source,
 licenses, observed implementation limits and acceptance criteria. They are reference
 material for implementation; upstream README claims do not establish our capabilities.
 
@@ -932,7 +932,7 @@ must not access freed state; timeouts do not prove cancellation of native work.
 
 AXTerminator provides useful examples for locator recovery and wait conditions.
 Its audited noncommercial license rules out treating its code as a permissive
-replacement here. Preserve Unimation's explicit input routes instead of copying
+replacement here. Preserve Actuate's explicit input routes instead of copying
 its semantic-to-global-click fallback. Its observer stub is not evidence of working
 notification delivery.
 
@@ -969,7 +969,7 @@ rejects ambiguous transports. Captures preserve encoded bytes and unknown orient
 no click mapping is fabricated. Modern RSD/DVT capture, video streaming and physical
 AX/input are not implemented. See [physical implementation status](crates/ios/PHYSICAL.md).
 
-`unimation::wait` now supplies bounded, read-only query presence/absence waits over
+`actuate::wait` now supplies bounded, read-only query presence/absence waits over
 `ObserveScope`, usable by both macOS and simulator providers. Reports include full
 last-observation evidence; incomplete coverage cannot establish absence. It neither
 heals old references nor retries input. Native synchronous deadlines still require
@@ -1004,7 +1004,7 @@ keys and restricted ASCII typing. A platform-owned typed session and JSONL adapt
 reuse the same methods. UI snapshots, guest overlays and Portal integration remain future adapters.
 `hid::Pointer` is a separate persistent relative-pointer adapter over the installed
 Android hid utility, with framework registration checks and explicit teardown.
-Mouse deltas are accelerated device counts, never inferred screen coordinates. See [Android source audit](docs/android-reference-audit.md)
+Mouse deltas are accelerated device counts, never inferred screen coordinates. See [Android source audit](_specs/android-reference-audit.md)
 for droidrun-rs, adb-wireless and rsadb tradeoffs. No Portal APK is installed here.
 
 
@@ -1019,13 +1019,13 @@ OS-specific interaction commands.
 Android dependency fixes are maintained as unified patch files and a checksummed
 upstream archive manifest. `scripts/prepare-deps.py` materializes them under ignored
 `target/patched-deps`; no dependency source tree is checked in. See
-[dependency preparation](docs/dependencies.md). Cargo vendor snapshots are optional
+[dependency preparation](_specs/dependencies.md). Cargo vendor snapshots are optional
 reproducible build artifacts, separate from these editable patches.
 
 
 ## Shared motion and session lifetime
 
-The exported `unimation::motion` module now owns eased spatial paths, validated
+The exported `actuate::motion` module now owns eased spatial paths, validated
 timing and drift-free bounded relative reports. Android HID, iOS simulator mouse
 and touch, and overlay drawing consume it. Physical iOS input remains unsupported.
 Idle bob is confined to visual rendering and does not move the native pointer.
@@ -1035,7 +1035,7 @@ An Android HID pointer and observation adapter can share one connection through
 one-shot CLI commands do not yet attach to a named background session. A future
 shared session manager must make attachment, idle expiry, stop, and connection-loss
 state explicit, while refusing to replay uncertain input. See
-[composition details](docs/composition.md) and [cursor capture audit](docs/android-cursor-capture.md).
+[composition details](_specs/composition.md) and [cursor capture audit](_specs/android-cursor-capture.md).
 
 ### Native pointer targeting evidence
 
@@ -1070,7 +1070,7 @@ Settings and display geometry are checked again before movement. Other user
 setting changes invalidate the calibration. Keep relative HID, calibrated HID,
 and absolute API injection as distinct composable capabilities. An absolute
 HID descriptor is not a portable replacement for Android's relative mouse
-classification. See `docs/android-validation.md` for source references and the
+classification. See `_specs/android-validation.md` for source references and the
 measured Settings theme roundtrip.
 
 ### Window-scoped macOS cursors and input validation
@@ -1127,12 +1127,12 @@ held mouse button during targeted delivery and ended native sessions early.
 Explicit foreground Quartz input completed the same drop. Keep background pointer
 tracking capability separate from verified native drag-and-drop capability, and
 verify application postconditions after dispatch. Never silently change to global
-input. See [the drag investigation](docs/macos-drag-validation.md) and its native
+input. See [the drag investigation](_specs/macos-drag-validation.md) and its native
 probe for evidence and reproduction steps.
 
 ### Upstream drag route audit
 
-The September 2026 [source audit](docs/macos-drag-reference-audit.md) found that
+The September 2026 [source audit](_specs/macos-drag-reference-audit.md) found that
 Cua rejects background macOS drag at its public tool boundary, Pi defaults to
 foreground HID input, and Open Computer Use distinguishes targeted events from
 global native drag sessions. Dioxus's inspected mouse constructor has no dragged
@@ -1162,7 +1162,7 @@ routes: Wayland virtual-pointer/keyboard delivery, XTest on X11 and Xwayland,
 screencopy and image-copy-capture frames, Hyprland window discovery and window-targeted
 shortcuts, and a layer-shell cursor renderer. Toolkits on Wayland report window-relative
 extents, so global bounds are derived from compositor window frames, with Xwayland
-extents scaled by the monitor scale. See [the Linux guide](docs/linux.md); the earlier
+extents scaled by the monitor scale. See [the Linux guide](_specs/linux.md); the earlier
 portal RemoteDesktop provider was not carried forward and remains a route for
 compositors without the wlr virtual-device protocols.
 
@@ -1173,12 +1173,12 @@ all raw provider fields and unknown visibility. Native tree completeness and
 application acceptance remain separate from successful transport calls.
 
 The Windows provider has compile validation only. The Linux provider was validated live
-on Hyprland with a GTK 4 fixture; see [validation](docs/validation.md#linux-2026-09-16).
-Follow the [acceptance checklist](docs/desktop-acceptance.md) on other hosts, saving
+on Hyprland with a GTK 4 fixture; see [validation](_specs/validation.md#linux-2026-09-16).
+Follow the [acceptance checklist](_specs/desktop-acceptance.md) on other hosts, saving
 capabilities, requests, replies and before/after evidence.
 
 Windows framework and Linux display-server differences are mapped in
-[desktop provider routes](docs/desktop-provider-routes.md). Alternate providers must
+[desktop provider routes](_specs/desktop-provider-routes.md). Alternate providers must
 describe their actual routes, coordinate domains and supported operations. Ordinary
 Rust composition is implemented; dynamic plugin loading and universal runtime route
 planning remain future work.
@@ -1194,5 +1194,5 @@ configuration; it never injects input. Each native renderer owns window ordering
 clipping and workspace checks. Windows and X11 scope use polling, so they cannot promise
 atomic attachment during compositor transitions; layer-shell surfaces are never occluded.
 
-See [composition](docs/composition.md), [Linux](docs/linux.md) and
-[Windows overlay](docs/windows-overlay.md).
+See [composition](_specs/composition.md), [Linux](_specs/linux.md) and
+[Windows overlay](_specs/windows-overlay.md).

@@ -1,6 +1,6 @@
 //! Explicit Windows shell operations. Taskbar settings affect the shared shell.
+use actuate::Result;
 use serde::Serialize;
-use unimation::Result;
 use windows_api::{
     Win32::{
         Foundation::RECT,
@@ -62,7 +62,7 @@ pub fn set_taskbar_auto_hide(enabled: bool) -> Result<TaskbarState> {
         SHAppBarMessage(ABM_SETSTATE, &mut data);
     }
     taskbar_state().map_err(|mut error| {
-        error.effect = unimation::Effect::Unknown;
+        error.effect = actuate::Effect::Unknown;
         error
     })
 }

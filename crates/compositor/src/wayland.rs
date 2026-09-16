@@ -2,10 +2,10 @@
 //! connection with its global list, logical output geometry, the seat's
 //! keymap, and shared-memory buffers. Each consumer owns its own connection
 //! and event queue; nothing here is a global singleton.
+use actuate::{NativeError, Point, Result, geometry::Rect};
 use memmap2::MmapMut;
 use serde::Serialize;
 use std::{fs::File, os::fd::AsFd};
-use unimation::{NativeError, Point, Result, geometry::Rect};
 use wayland_client::{
     Connection, Dispatch, EventQueue, QueueHandle,
     globals::{Global, GlobalList, GlobalListContents, registry_queue_init},
@@ -322,7 +322,7 @@ impl ShmBuffer {
             return Err(fail("Invalid buffer dimensions"));
         }
         let size = stride as usize * height as usize;
-        let fd = rustix::fs::memfd_create("unimation-shm", rustix::fs::MemfdFlags::CLOEXEC)
+        let fd = rustix::fs::memfd_create("actuate-shm", rustix::fs::MemfdFlags::CLOEXEC)
             .map_err(fail)?;
         let file = File::from(fd);
         file.set_len(size as u64).map_err(fail)?;

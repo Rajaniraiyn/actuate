@@ -53,7 +53,7 @@ def frame(hwnd):
 class Overlay:
     def __init__(self, output, session, physical_cursor='preserve',tracking='commands'):
         self.session=session
-        state=session.call('cursor_overlay',action=dict(kind='start',executable=str(ROOT/'target/debug/unimation-overlay.exe'),physical_cursor=physical_cursor,tracking=tracking))
+        state=session.call('cursor_overlay',action=dict(kind='start',executable=str(ROOT/'target/debug/actuate-overlay.exe'),physical_cursor=physical_cursor,tracking=tracking))
         self.process=SimpleNamespace(pid=state['pid'])
         self.command('configure', appearance={'color': [.62,.3,.96], 'scale':1.3, 'idle': {'style':'off'}})
 
@@ -116,7 +116,7 @@ def main():
             log = (args.output/'fixture.stderr').open('w',encoding='utf-8')
             fixture = subprocess.Popen(['powershell.exe','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',str(ROOT/'tests/windows_fixture.ps1'),'-Toolkit','wpf','-Interactive'], stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
             fixtures.append((fixture,log))
-            target = eventually(lambda: next((w for w in session.call('windows') if w['pid']==fixture.pid and w['title']=='Unimation WPF fixture' and w['visible']),None),20)
+            target = eventually(lambda: next((w for w in session.call('windows') if w['pid']==fixture.pid and w['title']=='Actuate WPF fixture' and w['visible']),None),20)
             hwnd = target['window_id']
             USER.SetForegroundWindow(hwnd)
             time.sleep(.5)
@@ -145,7 +145,7 @@ def main():
             def attachment():
                 from PIL import Image
                 USER.SetForegroundWindow(hwnd); time.sleep(.4)
-                oh=next(w['window_id'] for w in session.call('windows') if w['pid']==overlay.process.pid and w['title']=='Unimation cursor')
+                oh=next(w['window_id'] for w in session.call('windows') if w['pid']==overlay.process.pid and w['title']=='Actuate cursor')
                 original=rect(hwnd); bounds=frame(hwnd)
                 before=desktop_state()
                 overlay.move(bounds[0]+200,bounds[1]+180,500); time.sleep(.8)
@@ -154,7 +154,7 @@ def main():
                 eventually(lambda: abs(rect(oh)[0]-cursor[0]-130)<=1)
                 assert abs(rect(oh)[1]-cursor[1]-90)<=1
                 capture('window-moved')
-                cover=next(w['window_id'] for w in session.call('windows') if w['pid']==fixture.pid and w['title']=='Unimation occlusion test')
+                cover=next(w['window_id'] for w in session.call('windows') if w['pid']==fixture.pid and w['title']=='Actuate occlusion test')
                 cr=rect(oh)
                 assert USER.SetWindowPos(cover,0,cr[0]-40,cr[1]-40,360,220,0x10)
                 time.sleep(.6)
@@ -238,7 +238,7 @@ def main():
                         overlay.scope(hwnd)
                         bounds=frame(hwnd)
                         overlay.move(bounds[0]+220,bounds[1]+180,0)
-                        oh=next(w['window_id'] for w in session.call('windows') if w['pid']==overlay.process.pid and w['title']=='Unimation cursor')
+                        oh=next(w['window_id'] for w in session.call('windows') if w['pid']==overlay.process.pid and w['title']=='Actuate cursor')
                         assert dll.MoveWindowToDesktopNumber(hwnd,created)==1
                         eventually(lambda:not USER.IsWindowVisible(oh))
                         assert dll.GetCurrentDesktopNumber()==original
@@ -280,7 +280,7 @@ def main():
                     log=(args.output/'fixture.stderr').open('w',encoding='utf-8')
                     fixture=subprocess.Popen(['powershell.exe','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',str(ROOT/'tests/windows_fixture.ps1'),'-Toolkit','wpf','-Interactive'],stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
                     fixtures.append((fixture,log))
-                    target=eventually(lambda:USER.FindWindowW(None,'Unimation WPF fixture'),20)
+                    target=eventually(lambda:USER.FindWindowW(None,'Actuate WPF fixture'),20)
                     bar=session.call('taskbar_state')
                     old=desktop_state()['cursor']
                     try:
@@ -288,7 +288,7 @@ def main():
                         time.sleep(1)
                         tree=snapshot(bar['window_id'])
                         (args.output/'taskbar-tree.json').write_text(json.dumps(tree,indent=2),encoding='utf-8')
-                        icons=[n for n in tree['nodes'] if 'Unimation test tray' in n['attributes'].get('name','')]
+                        icons=[n for n in tree['nodes'] if 'Actuate test tray' in n['attributes'].get('name','')]
                         if not icons:
                             expand=next(n for n in tree['nodes'] if 'hidden icons' in n['attributes'].get('name','').lower() and 'invoke' in n['actions'])
                             semantic(expand,'invoke')
@@ -296,7 +296,7 @@ def main():
                             popup=eventually(lambda:USER.FindWindowW('TopLevelWindowForOverflowXamlIsland',None))
                             tree=snapshot(popup)
                             (args.output/'overflow-tree.json').write_text(json.dumps(tree,indent=2),encoding='utf-8')
-                            icons=[n for n in tree['nodes'] if 'Unimation test tray' in n['attributes'].get('name','')]
+                            icons=[n for n in tree['nodes'] if 'Actuate test tray' in n['attributes'].get('name','')]
                         assert len(icons)==1,[(n['attributes'].get('name'),n['actions']) for n in tree['nodes']]
                         b=icons[0]['attributes']['bounds']
                         x,y=b['x']+b['width']/2,b['y']+b['height']/2

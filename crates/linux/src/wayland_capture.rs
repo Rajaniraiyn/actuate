@@ -1,16 +1,16 @@
 //! Still capture through wlr-screencopy (outputs) and ext-image-copy-capture
 //! (toplevels). Frames are written as PNG with a geometry mapping in logical
 //! layout coordinates. Capturing never raises or focuses anything.
+use actuate::{
+    Capture, NativeError, Result,
+    geometry::{FrameMapping, Rect},
+    image::absolute_output,
+};
 use compositor::wayland::{Desktop, Outputs, ShmBuffer, fail};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
-};
-use unimation::{
-    Capture, NativeError, Result,
-    geometry::{FrameMapping, Rect},
-    image::absolute_output,
 };
 use wayland_client::{
     Connection, Dispatch, QueueHandle,
@@ -539,7 +539,7 @@ impl Capture for WaylandCapture {
                 let (name, rect) = self
                     .state
                     .outputs
-                    .find(&unimation::Point { x: *x, y: *y })
+                    .find(&actuate::Point { x: *x, y: *y })
                     .map(|o| (o.name.clone(), o.rect()))
                     .ok_or_else(|| {
                         NativeError::new(

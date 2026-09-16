@@ -1,16 +1,16 @@
 //! External session framing. Typed Android providers never serialize between layers.
 use crate::{Android, CommandTransport, error, session};
+use actuate::{Effect, OutputFormat, Result, transport::ValueReply};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, Write},
     path::{Path, PathBuf},
 };
-use unimation::{Effect, OutputFormat, Result, transport::ValueReply};
 
 pub fn capture_file<D: CommandTransport>(device: &mut Android<D>, path: &Path) -> Result<Value> {
     let bytes = device.capture_png()?;
-    let (width, height) = unimation::image::png_dimensions(&bytes)?;
+    let (width, height) = actuate::image::png_dimensions(&bytes)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -57,7 +57,7 @@ pub fn serve<D: CommandTransport>(
     writer: impl Write,
     format: OutputFormat,
 ) -> std::io::Result<()> {
-    unimation::transport::serve(reader, writer, format, |request| {
+    actuate::transport::serve(reader, writer, format, |request| {
         dispatch(device, request).map(ValueReply::from)
     })
 }

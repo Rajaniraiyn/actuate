@@ -18,45 +18,45 @@ def main():
         def loaded():
             nonlocal tree
             tree = observe()
-            return any(value(n, 'AXIdentifier') == 'unimation-test-checkbox' for n in tree['nodes'])
+            return any(value(n, 'AXIdentifier') == 'actuate-test-checkbox' for n in tree['nodes'])
         wait_for(loaded, 'Expanded fixture not available')
         nodes = {value(n, 'AXIdentifier'): n for n in tree['nodes']}
         ref = lambda name: nodes[name]['reference']
-        field = ref('unimation-test-field')
+        field = ref('actuate-test-field')
         def field_value():
             return session.result(op='attribute', target=field, name='AXValue')['value']
         def press(name, mode='skylight'):
             return session.result(op='click', target=ref(name), mode=mode)
         session.result(op='semantic', target=tree['root'],
                        action={'kind': 'set_bool', 'attribute': 'AXFrontmost', 'value': True})
-        press('unimation-test-checkbox', 'semantic')
+        press('actuate-test-checkbox', 'semantic')
         wait_for(lambda: field_value() == 'checked', 'Checkbox did not turn on')
-        press('unimation-test-checkbox', 'semantic')
+        press('actuate-test-checkbox', 'semantic')
         wait_for(lambda: field_value() == 'unchecked', 'Checkbox did not turn off')
-        press('unimation-test-slider')
+        press('actuate-test-slider')
         wait_for(lambda: str(field_value()).startswith('slider:'), 'Slider click not consumed')
         assert field_value() != 'slider:20'
-        checkbox=nodes['unimation-test-checkbox']; p=checkbox['attributes']['AXPosition']; z=checkbox['attributes']['AXSize']
+        checkbox=nodes['actuate-test-checkbox']; p=checkbox['attributes']['AXPosition']; z=checkbox['attributes']['AXSize']
         session.result(op='skylight_pointer',target=checkbox['reference'],action={'kind':'click','point':{'x':p['x']+8,'y':p['y']+z['height']/2}})
         wait_for(lambda: field_value() == 'checked', 'Checkbox glyph click not consumed')
         print('PASS checkbox semantic toggles, explicit glyph click, and native slider click')
 
         before = observe()
-        press('unimation-add-item', 'semantic')
+        press('actuate-add-item', 'semantic')
         after = observe()
         added = session.result(op='diff', before=before['revision'], after=after['revision'])
-        dynamic = next(n for n in added['newly_observed'] if value(n, 'AXIdentifier') == 'unimation-dynamic-item')
-        press('unimation-remove-item', 'semantic')
+        dynamic = next(n for n in added['newly_observed'] if value(n, 'AXIdentifier') == 'actuate-dynamic-item')
+        press('actuate-remove-item', 'semantic')
         removed_tree = observe()
         removed = session.result(op='diff', before=after['revision'], after=removed_tree['revision'])
         assert any(n['reference'] == dynamic['reference'] for n in removed['removed_from_scope']), removed
         after_nodes = {value(n, 'AXIdentifier'): n for n in removed_tree['nodes']}
-        assert after_nodes['unimation-test-button']['reference'] == ref('unimation-test-button')
-        with tempfile.TemporaryDirectory(prefix='unimation-offline-') as directory:
+        assert after_nodes['actuate-test-button']['reference'] == ref('actuate-test-button')
+        with tempfile.TemporaryDirectory(prefix='actuate-offline-') as directory:
             before_file=Path(directory)/'before.json'; after_file=Path(directory)/'after.json'
             before_file.write_text(json.dumps(before)); after_file.write_text(json.dumps(after))
             def cli(*args):
-                return json.loads(subprocess.run(['target/debug/unimation',*args],check=True,text=True,capture_output=True).stdout)
+                return json.loads(subprocess.run(['target/debug/actuate',*args],check=True,text=True,capture_output=True).stdout)
             assert cli('diff',str(before_file),str(after_file)) == added
             only=cli('diff','--modified-only',str(before_file),str(after_file))
             assert only['modified']==added['modified'] and 'newly_observed' not in only
@@ -64,7 +64,7 @@ def main():
             assert matches and all(value(n,'AXRole')=='AXButton' for n in matches)
         print('PASS insertion/removal diffs, unchanged sibling reference, and offline CLI diff/query')
 
-        press('unimation-test-popup', 'semantic')
+        press('actuate-test-popup', 'semantic')
         menu = None
         def menu_open():
             nonlocal menu
@@ -76,14 +76,14 @@ def main():
         wait_for(lambda: field_value() == 'Beta', 'Popup selection not consumed')
         print('PASS native popup menu query and selection')
 
-        press('unimation-test-dialog', 'semantic')
+        press('actuate-test-dialog', 'semantic')
         modal = None
         def modal_open():
             nonlocal modal
             modal = observe()
             return any(value(n, 'AXRole') == 'AXSheet' for n in modal['nodes'])
         wait_for(modal_open, 'Modal sheet not observed')
-        blocked=session.call(op='click',target=ref('unimation-test-button'),mode='global')
+        blocked=session.call(op='click',target=ref('actuate-test-button'),mode='global')
         assert blocked.get('error',{}).get('code')=='blocked_by_modal', blocked
         assert blocked['error']['effect']=='none', blocked
         dismiss = next(n for n in modal['nodes'] if value(n, 'AXRole') == 'AXButton' and value(n, 'AXTitle') == 'Dismiss')
@@ -91,7 +91,7 @@ def main():
         wait_for(lambda: field_value() == 'dismissed', 'Modal sheet not dismissed')
         print('PASS modal sheet query and dismissal')
 
-        button = next(n for n in observe()['nodes'] if value(n, 'AXIdentifier') == 'unimation-test-button')
+        button = next(n for n in observe()['nodes'] if value(n, 'AXIdentifier') == 'actuate-test-button')
         position, size = button['attributes']['AXPosition'], button['attributes']['AXSize']
         center = {'x': position['x']+size['width']/2, 'y': position['y']+size['height']/2}
         window = session.result(op='window', target=button['reference'])
@@ -101,7 +101,7 @@ def main():
         print('PASS window-local coordinates')
         before_cursor=cursor_position()
         before_active=session.result(op='discover')['active_pid']
-        session.result(op='cursor_overlay',action={'kind':'start','executable':str(Path('target/debug/unimation-overlay').resolve())})
+        session.result(op='cursor_overlay',action={'kind':'start','executable':str(Path('target/debug/actuate-overlay').resolve())})
         try:
             session.result(op='click',target=button['reference'],mode='skylight')
             state=session.result(op='cursor_state')
@@ -122,7 +122,7 @@ def main():
         finally:
             session.result(op='cursor_overlay',action={'kind':'stop'})
 
-        with tempfile.TemporaryDirectory(prefix='unimation-capture-test-') as directory:
+        with tempfile.TemporaryDirectory(prefix='actuate-capture-test-') as directory:
             session.result(op='semantic',target=field,action={'kind':'set_string','attribute':'AXValue','value':'image-reset'})
             frame = session.result(op='capture', source={'kind':'window','window_id':window['window_id']},
                                    path=str(Path(directory)/'window.png'), max_pixel_edge=300)

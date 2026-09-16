@@ -30,7 +30,7 @@ def exercise(device_set, udid):
         time.sleep(1)
         session.result(op='touch',action={'kind':'swipe','from':{'x':0.98,'y':0.001},'to':{'x':0.98,'y':0.55},'duration_ms':600,'edge':'top'})
         observe_until(session,lambda t:any(label(n)=='Add Controls' for n in t['nodes']))
-        with tempfile.TemporaryDirectory(prefix='unimation-ios-capture-') as directory:
+        with tempfile.TemporaryDirectory(prefix='actuate-ios-capture-') as directory:
             capture=session.result(op='capture',path=str(Path(directory)/'control-center.png'))
             assert capture['pixel_width']>0 and capture['pixel_height']>0
             assert capture['click_mapping'] is None

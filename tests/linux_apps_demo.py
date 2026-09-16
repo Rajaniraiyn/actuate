@@ -10,7 +10,7 @@ be watched on the applications' workspace.
 
 Run with both applications already open on a workspace of your own:
 
-    UNIMATION_CALC_CLASS=omacalc UNIMATION_TERMINAL_TITLE=UnimationTerminal \
+    ACTUATE_CALC_CLASS=omacalc ACTUATE_TERMINAL_TITLE=ActuateTerminal \
         python3 tests/linux_apps_demo.py
 
 Nothing here dispatches seat input; the user can keep typing and pointing elsewhere.
@@ -22,11 +22,11 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.environ.get('UNIMATION_DEMO_OUT', os.path.join(ROOT, 'target', 'linux-apps-demo'))
-CALC_CLASS = os.environ.get('UNIMATION_CALC_CLASS', 'omacalc')
-TERMINAL_TITLE = os.environ.get('UNIMATION_TERMINAL_TITLE', 'UnimationTerminal')
-HOLD_SECONDS = int(os.environ.get('UNIMATION_DEMO_HOLD_SECONDS', '600'))
-BINARY = os.environ.get('UNIMATION_BINARY', os.path.join(ROOT, 'target', 'debug', 'unimation'))
+OUT = os.environ.get('ACTUATE_DEMO_OUT', os.path.join(ROOT, 'target', 'linux-apps-demo'))
+CALC_CLASS = os.environ.get('ACTUATE_CALC_CLASS', 'omacalc')
+TERMINAL_TITLE = os.environ.get('ACTUATE_TERMINAL_TITLE', 'ActuateTerminal')
+HOLD_SECONDS = int(os.environ.get('ACTUATE_DEMO_HOLD_SECONDS', '600'))
+BINARY = os.environ.get('ACTUATE_BINARY', os.path.join(ROOT, 'target', 'debug', 'actuate'))
 
 # Pixel centers of omacalc's keys in its 400x568 window capture at scale 1.25.
 COLS = [60, 153, 246, 339]
@@ -51,7 +51,7 @@ def hypr(command):
 
 class Session:
     def __init__(self):
-        env = dict(os.environ, UNIMATION_SOFT_CURSOR='1')
+        env = dict(os.environ, ACTUATE_SOFT_CURSOR='1')
         self.proc = subprocess.Popen([BINARY, 'session', '--json'], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, text=True, bufsize=1, env=env)
 
@@ -87,7 +87,7 @@ def main():
         # Terminal: keys go to the window through Hyprland; focus stays where the user has it.
         snapshot = session(op='snapshot', request={'pid': term['pid'], 'max_nodes': 200}, format='json')
         frame = next(n for n in snapshot['nodes'] if n['attributes'].get('role', {}).get('value') == 'frame')
-        for char in list('echo unimation-ok') + ['Return']:
+        for char in list('echo actuate-ok') + ['Return']:
             session(op='hyprland_shortcut', target=frame['reference'], key=KEYSYMS.get(char, char))
             time.sleep(0.1)
         time.sleep(0.8)

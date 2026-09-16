@@ -1,6 +1,10 @@
 //! Explicit macOS screencapture provider. Native geometry uses current objc2 bindings.
 //! Capture does not raise windows. An image is not proof that every pixel is readable.
 use crate::error;
+use actuate::{
+    Capture, Effect, Result,
+    geometry::{FrameMapping, Rect},
+};
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType, CGRect};
 use objc2_core_graphics::*;
 use serde::{Deserialize, Serialize};
@@ -10,10 +14,6 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     time::{Duration, Instant},
-};
-use unimation::{
-    Capture, Effect, Result,
-    geometry::{FrameMapping, Rect},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ pub struct Frame {
     pub displays: Vec<DisplayGeometry>,
 }
 pub struct ScreenshotCapture;
-fn fail(message: impl ToString) -> unimation::NativeError {
+fn fail(message: impl ToString) -> actuate::NativeError {
     error("capture_failed", message, Effect::None)
 }
 fn rect(r: CGRect) -> Rect {
@@ -180,7 +180,7 @@ struct Staging(PathBuf);
 impl Staging {
     fn new() -> Result<Self> {
         let name = objc2_foundation::NSUUID::new().UUIDString().to_string();
-        let path = std::env::temp_dir().join(format!("unimation-capture-{name}"));
+        let path = std::env::temp_dir().join(format!("actuate-capture-{name}"));
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&path)
@@ -204,7 +204,7 @@ impl Capture for ScreenshotCapture {
     type Request = CaptureRequest;
     type Frame = Frame;
     fn capture(&mut self, request: CaptureRequest) -> Result<Frame> {
-        let output_path = unimation::image::absolute_output(&request.path)?;
+        let output_path = actuate::image::absolute_output(&request.path)?;
         if !CGPreflightScreenCaptureAccess() {
             return Err(error(
                 "screen_recording_denied",
@@ -259,7 +259,7 @@ impl Capture for ScreenshotCapture {
             }
         }
         let bytes = std::fs::read(&staging_path).map_err(fail)?;
-        let (pixel_width, pixel_height) = unimation::image::png_dimensions(&bytes)?;
+        let (pixel_width, pixel_height) = actuate::image::png_dimensions(&bytes)?;
         let mapping = FrameMapping {
             source_bounds: bounds,
             pixel_width,
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn flaglike_output_is_absolute() {
         for name in ["-c", "-R-1,-2,100,100", "-42.png", "relative.png"] {
-            let path = unimation::image::absolute_output(std::path::Path::new(name)).unwrap();
+            let path = actuate::image::absolute_output(std::path::Path::new(name)).unwrap();
             assert!(path.is_absolute());
             assert_eq!(path.file_name().unwrap(), name);
         }
@@ -299,7 +299,7 @@ mod tests {
     #[ignore = "requires a logged-in macOS desktop and Screen Recording permission"]
     fn capture_live_display() {
         let path =
-            PathBuf::from("/tmp").join(format!("unimation-capture-{}.png", std::process::id()));
+            PathBuf::from("/tmp").join(format!("actuate-capture-{}.png", std::process::id()));
         let frame = ScreenshotCapture
             .capture(CaptureRequest {
                 source: CaptureSource::Display {
@@ -314,14 +314,12 @@ mod tests {
     #[test]
     #[ignore = "requires a live visible window and Screen Recording permission"]
     fn capture_live_window() {
-        let id = std::env::var("UNIMATION_TEST_WINDOW_ID")
+        let id = std::env::var("ACTUATE_TEST_WINDOW_ID")
             .expect("set native window id")
             .parse()
             .unwrap();
-        let path = PathBuf::from("/tmp").join(format!(
-            "unimation-window-capture-{}.png",
-            std::process::id()
-        ));
+        let path = PathBuf::from("/tmp")
+            .join(format!("actuate-window-capture-{}.png", std::process::id()));
         let frame = ScreenshotCapture
             .capture(CaptureRequest {
                 source: CaptureSource::Window { window_id: id },

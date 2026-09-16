@@ -22,10 +22,10 @@ def main():
         parser.error('--interactive requires an available desktop')
     args.output.mkdir(parents=True,exist_ok=True)
     root=(args.output/('files-'+uuid.uuid4().hex[:8])).resolve()
-    source=root/'Unimation source'
-    destination=root/'Unimation destination'
+    source=root/'Actuate source'
+    destination=root/'Actuate destination'
     source.mkdir(parents=True); destination.mkdir()
-    data=b'Unimation disposable drag acceptance.\r\n'
+    data=b'Actuate disposable drag acceptance.\r\n'
     (source/'Drag sample.txt').write_bytes(data)
     folder=source/'Drag folder'; folder.mkdir()
     (folder/'nested.txt').write_bytes(data+b'nested\r\n')

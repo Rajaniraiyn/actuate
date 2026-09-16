@@ -1,6 +1,7 @@
 //! Physical-device services through usbmuxd. CoreSimulator uses a separate transport.
 //! Discovery never pairs devices. Capture starts an existing screenshotr service but
 //! never mounts developer images, installs software, or starts XCTest.
+use actuate::{Capture, Effect, NativeError, Result};
 use idevice::{
     IdeviceError, IdeviceService,
     provider::{IdeviceProvider, UsbmuxdProvider},
@@ -13,7 +14,6 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use unimation::{Capture, Effect, NativeError, Result};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", content = "address", rename_all = "snake_case")]
@@ -182,7 +182,7 @@ impl PhysicalDevices {
             tag: 0,
             udid: device.udid.clone(),
             device_id: device.transport_id,
-            label: "unimation".into(),
+            label: "actuate".into(),
         }
     }
     pub async fn screenshot(&self, udid: &str) -> Result<EncodedFrame> {
@@ -390,11 +390,11 @@ mod tests {
             let address = self.0;
             Box::pin(async move {
                 let stream = tokio::net::TcpStream::connect(address).await?;
-                Ok(idevice::Idevice::new(Box::new(stream), "unimation-test"))
+                Ok(idevice::Idevice::new(Box::new(stream), "actuate-test"))
             })
         }
         fn label(&self) -> &str {
-            "unimation-test"
+            "actuate-test"
         }
         fn get_pairing_file(
             &self,

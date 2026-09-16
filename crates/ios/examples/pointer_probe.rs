@@ -1,6 +1,6 @@
 #[cfg(target_os = "macos")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use unimation::HardwareButtons;
+    use actuate::HardwareButtons;
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 4 || args[3] != "--enable" {
         return Err(
@@ -12,16 +12,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::path::Path::new(&args[2]);
     let capture = ios::simulator::Simctl::installed()?.with_set(path);
     let mut input = ios::SimulatorHid::connect(udid, path)?;
-    input.press_button(unimation::HardwareButton::Home)?;
+    input.press_button(actuate::HardwareButton::Home)?;
     std::thread::sleep(std::time::Duration::from_millis(400));
-    capture.screenshot(udid, "/tmp/unimation-pointer-before.png")?;
+    capture.screenshot(udid, "/tmp/actuate-pointer-before.png")?;
     let mut pointer = ios::SimulatorPointer::connect(udid, path)?;
     println!("enable: {:?}", pointer.enable()?);
     std::thread::sleep(std::time::Duration::from_millis(250));
     println!("move: {:?}", pointer.move_relative(120.0, 90.0)?);
-    capture.screenshot(udid, "/tmp/unimation-pointer-after.png")?;
+    capture.screenshot(udid, "/tmp/actuate-pointer-after.png")?;
     println!("move again: {:?}", pointer.move_relative(-65.0, 20.0)?);
-    capture.screenshot(udid, "/tmp/unimation-pointer-moved.png")?;
+    capture.screenshot(udid, "/tmp/actuate-pointer-moved.png")?;
     println!("close: {:?}", pointer.close()?);
     Ok(())
 }

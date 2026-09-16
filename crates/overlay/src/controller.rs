@@ -1,6 +1,7 @@
 //! Optional visual helper lifetime. Enqueuing a command does not acknowledge a
 //! rendered frame and never changes the result of an input-provider operation.
 use crate::{CursorAcknowledgement, CursorCommand};
+use actuate::Result;
 use serde_json::{Value, json};
 use std::{
     io::Write,
@@ -10,7 +11,6 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use unimation::Result;
 
 pub struct OverlayController {
     physical_cursor: crate::PhysicalCursorPolicy,
@@ -28,8 +28,8 @@ pub struct OverlayState {
     pub tracking: crate::CursorTracking,
     pub presentation_acknowledged: bool,
 }
-fn failure(message: impl ToString) -> unimation::NativeError {
-    unimation::NativeError::new("overlay_failed", message)
+fn failure(message: impl ToString) -> actuate::NativeError {
+    actuate::NativeError::new("overlay_failed", message)
 }
 fn serialize(command: Value) -> Result<Vec<u8>> {
     let typed: CursorCommand = serde_json::from_value(command.clone()).map_err(failure)?;
@@ -236,7 +236,7 @@ impl Drop for OverlayController {
         let _ = self.stop();
     }
 }
-impl unimation::CursorVisualization for OverlayController {
+impl actuate::CursorVisualization for OverlayController {
     type Command = CursorCommand;
     type Status = CursorAcknowledgement;
     fn visualize(&mut self, command: Self::Command) -> Result<Self::Status> {
@@ -255,8 +255,7 @@ mod tests {
         let mut controller = OverlayController::start("/bin/cat").unwrap();
         controller.show().unwrap();
         assert_eq!(
-            unimation::CursorVisualization::visualize(&mut controller, CursorCommand::Show)
-                .unwrap(),
+            actuate::CursorVisualization::visualize(&mut controller, CursorCommand::Show).unwrap(),
             CursorAcknowledgement::Queued
         );
         controller.stop().unwrap();

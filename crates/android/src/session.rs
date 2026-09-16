@@ -1,7 +1,7 @@
 //! Typed session operations independent of CLI parsing and connection discovery.
 use crate::{Android, AndroidKey, CommandTransport, DeviceInfo, PixelPoint};
+use actuate::{Receipt, Result};
 use serde::{Deserialize, Serialize};
-use unimation::{Receipt, Result};
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {

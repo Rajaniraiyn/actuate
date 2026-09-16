@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-unimation.workspace = true
+actuate.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 overlay.workspace = true

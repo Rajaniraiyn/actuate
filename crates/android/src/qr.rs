@@ -7,6 +7,7 @@
 //!
 //! Protocol: <https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/docs/dev/adb_wifi.md>
 //! Scanner: <https://android.googlesource.com/platform/packages/apps/Settings/+/fcdcf5a0a11196df094f2297e4be5ad9c0fc53fb/src/com/android/settings/development/AdbQrcodeScannerFragment.java>
+use actuate::{Effect, Result};
 use mdns_sd::{Receiver, RecvTimeoutError, ScopedIp, ServiceDaemon, ServiceEvent};
 use qrcode::{QrCode, render::unicode::Dense1x2};
 use rand::RngCore;
@@ -14,7 +15,6 @@ use std::{
     net::{SocketAddr, SocketAddrV6},
     time::{Duration, Instant},
 };
-use unimation::{Effect, Result};
 
 /// Fresh credentials for one explicit pairing attempt. No Debug or Serialize
 /// implementation, so normal diagnostics cannot accidentally print the secret.

@@ -1,11 +1,11 @@
 //! Independently selectable simulator services and lazy input connection.
 use crate::{SimulatorHid, simulator::Simctl};
-use serde::Serialize;
-use std::path::{Path, PathBuf};
-use unimation::{
+use actuate::{
     AppLifecycle, Capture, Effect, HardwareButton, HardwareButtons, HidKeyboard, NativeError,
     Receipt, Result, TouchAction, TouchInput,
 };
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 /// Loading HID support is deferred until an input request. Observation remains
 /// usable when a private HID framework is absent; no other input route is tried.
@@ -82,7 +82,7 @@ impl Capture for SimulatorServices {
         std::fs::File::open(&path)
             .and_then(|mut file| file.read_exact(&mut header))
             .map_err(|e| failed(e.to_string()))?;
-        let (pixel_width, pixel_height) = unimation::image::png_dimensions(&header)
+        let (pixel_width, pixel_height) = actuate::image::png_dimensions(&header)
             .map_err(|_| failed("Native screenshot did not return a PNG header"))?;
         Ok(SimulatorFrame {
             path,

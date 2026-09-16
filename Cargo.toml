@@ -7,11 +7,13 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Rajaniraiyn/actuate"
+homepage = "https://rajaniraiyn.dev/actuate/"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-unimation = { path = "crates/unimation" }
+actuate = { path = "crates/actuate" }
 macos = { path = "crates/macos" }
 ios = { path = "crates/ios" }
 usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics", "completions"] }

@@ -7,11 +7,11 @@
 //! Relative counts are accelerated by Android; they are not screen pixels.
 mod linear;
 use crate::{connection::Connection, error};
+use actuate::{Effect, Receipt, Result};
 use droidmux::shell::{ShellOptions, ShellSession};
 pub use linear::LinearPointer;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use unimation::{Effect, Receipt, Result};
 
 const DESCRIPTOR: &[u8] = &[
     0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x01, 0xa1, 0x00, 0x05, 0x09, 0x19, 0x01, 0x29, 0x05,
@@ -120,7 +120,7 @@ impl<'a> Pointer<'a> {
             failed: false,
             closed: false,
         };
-        let name = format!("Unimation pointer {:016x}", rand::random::<u64>());
+        let name = format!("Actuate pointer {:016x}", rand::random::<u64>());
         pointer.send(serde_json::json!({"id":1,"command":"register","name":name,"vid":0,"pid":0,"bus":"usb","descriptor":DESCRIPTOR}))
             .map_err(|e| pointer.stage_error("registration_write", e, "registration command was not acknowledged"))?;
         // Kernel UHID_OPEN does not guarantee InputReader registration. Observe
@@ -175,9 +175,9 @@ impl<'a> Pointer<'a> {
     fn stage_error(
         &self,
         stage: &str,
-        cause: unimation::NativeError,
+        cause: actuate::NativeError,
         detail: &str,
-    ) -> unimation::NativeError {
+    ) -> actuate::NativeError {
         let output = self.diagnostics();
         error(
             "hid_registration",
@@ -321,7 +321,7 @@ impl<'a> Pointer<'a> {
     /// Dispatch a prevalidated path in relative HID counts, retaining held buttons.
     /// Android accelerates these counts; this does not promise a screen endpoint.
     /// Deadlines are measured from one start, with no input retries on failure.
-    pub fn move_smooth(&mut self, plan: &unimation::motion::RelativeMotionPlan) -> Result<Receipt> {
+    pub fn move_smooth(&mut self, plan: &actuate::motion::RelativeMotionPlan) -> Result<Receipt> {
         if self.failed || self.closed {
             return Err(error(
                 "hid_unavailable",

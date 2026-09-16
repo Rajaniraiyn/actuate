@@ -4,8 +4,8 @@
 //! Service target 0x36 is guest-wide; use a dedicated simulator for exclusive
 //! ownership. Call `enable` explicitly before dispatch and `close` afterward.
 use crate::SimulatorHid;
+use actuate::{Effect, NativeError, Receipt, Result};
 use std::{ffi::c_void, path::Path, time::Duration};
-use unimation::{Effect, NativeError, Receipt, Result};
 type Service = unsafe extern "C" fn() -> *mut c_void;
 type Convert = unsafe extern "C" fn(*const c_void, u32) -> *mut c_void;
 type Relative =
@@ -175,7 +175,7 @@ impl SimulatorPointer {
     /// Follow a shared relative-count plan using the explicitly enabled guest mouse.
     /// Guest acceleration still determines the screen endpoint. Held buttons remain
     /// held, and a failed sample is never retried.
-    pub fn move_smooth(&mut self, plan: &unimation::motion::RelativeMotionPlan) -> Result<Receipt> {
+    pub fn move_smooth(&mut self, plan: &actuate::motion::RelativeMotionPlan) -> Result<Receipt> {
         if !self.enabled {
             return Err(error(
                 "not_enabled",
@@ -282,7 +282,7 @@ fn receipt() -> Receipt {
         route: "ios.simulator.indigo.mouse".into(),
     }
 }
-impl unimation::RelativePointerInput for SimulatorPointer {
+impl actuate::RelativePointerInput for SimulatorPointer {
     fn move_relative(&mut self, dx: f64, dy: f64) -> Result<Receipt> {
         SimulatorPointer::move_relative(self, dx, dy)
     }

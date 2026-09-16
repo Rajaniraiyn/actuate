@@ -62,7 +62,7 @@ def test_event_variants():
     override func otherMouseUp(with event: NSEvent) { field.stringValue += "|up" }
     override func mouseDragged(with event: NSEvent) { field.stringValue = "drag" }
 """
-    with tempfile.TemporaryDirectory(prefix='unimation-events-') as directory:
+    with tempfile.TemporaryDirectory(prefix='actuate-events-') as directory:
         swift = Path(directory) / 'probe.swift'
         binary = Path(directory) / 'probe'
         swift.write_text(source.replace('    var field: NSTextField!', handlers, 1))
@@ -76,7 +76,7 @@ def test_event_variants():
             def ready():
                 nonlocal tree
                 tree = session.result(op='observe', request={'pid': process.pid})
-                return any(value(n, 'AXIdentifier') == 'unimation-test-field' for n in tree['nodes'])
+                return any(value(n, 'AXIdentifier') == 'actuate-test-field' for n in tree['nodes'])
             wait_for(ready, 'Event probe did not appear')
             def activate():
                 session.result(op='semantic', target=tree['root'],
@@ -84,8 +84,8 @@ def test_event_variants():
                 return process.pid in active_pids(session)
             wait_for(activate, 'Event probe did not activate')
             nodes = {value(n, 'AXIdentifier'): n for n in tree['nodes']}
-            field = nodes['unimation-test-field']['reference']
-            view = nodes['unimation-test-scroll']
+            field = nodes['actuate-test-field']['reference']
+            view = nodes['actuate-test-scroll']
             target = view['reference']
             cases = [('left', 1, {}, 'left:1:false|up'),
                      ('left', 2, {}, 'left:2:false|up'),
@@ -119,12 +119,12 @@ def main():
         def loaded():
             nonlocal tree
             tree = session.result(op='observe', request={'pid': fixture.pid})
-            return any(value(node, 'AXIdentifier') == 'unimation-test-field' for node in tree['nodes'])
+            return any(value(node, 'AXIdentifier') == 'actuate-test-field' for node in tree['nodes'])
         wait_for(loaded, 'Fixture did not expose its controls')
         refs = {value(node, 'AXIdentifier'): node['reference'] for node in tree['nodes']}
-        field = refs['unimation-test-field']
-        button = refs['unimation-test-button']
-        scroll = refs['unimation-test-scroll']
+        field = refs['actuate-test-field']
+        button = refs['actuate-test-button']
+        scroll = refs['actuate-test-scroll']
         fixture_root = tree['root']
 
         def activate_fixture():
@@ -154,8 +154,8 @@ def main():
                                           'vertical': vertical, 'horizontal': horizontal})
             current = session.result(op='observe', request={'pid': fixture.pid})
             current_refs = {value(node, 'AXIdentifier'): node['reference'] for node in current['nodes']}
-            assert current_refs['unimation-test-button'] == button
-            assert current_refs['unimation-test-field'] == field
+            assert current_refs['actuate-test-button'] == button
+            assert current_refs['actuate-test-field'] == field
 
         check_fixture()
         print('PASS foreground SkyLight click variants, modifier flags, both scroll axes, stable refs, cursor/focus unchanged')

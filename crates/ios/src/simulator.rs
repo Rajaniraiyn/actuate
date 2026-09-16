@@ -1,4 +1,5 @@
 //! Installed CoreSimulator lifecycle operations. No runtime downloads or implicit device selection.
+use actuate::{Effect, NativeError, Result};
 use serde_json::Value;
 use std::{
     ffi::OsStr,
@@ -8,7 +9,6 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use unimation::{Effect, NativeError, Result};
 
 const INSTALLED_SIMCTL: &str =
     "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl";

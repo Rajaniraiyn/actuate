@@ -1,7 +1,7 @@
 //! Optional platform-owned binary command surface.
 use usage::{Cli, Subcommands};
 #[derive(Cli)]
-#[usage(bin = "unimation-ios", version)]
+#[usage(bin = "actuate-ios", version)]
 struct App {
     /// Opt in to JSON records or JSONL session responses.
     #[usage(long, global)]
@@ -27,9 +27,9 @@ enum Command {
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::parse();
     let format = if app.json {
-        unimation::OutputFormat::Json
+        actuate::OutputFormat::Json
     } else {
-        unimation::OutputFormat::Text
+        actuate::OutputFormat::Text
     };
     match app.command {
         Command::List { device_set } => {
@@ -37,7 +37,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(path) = device_set {
                 sim = sim.with_set(path);
             }
-            unimation::output::write_value(std::io::stdout().lock(), &sim.list()?, format)?;
+            actuate::output::write_value(std::io::stdout().lock(), &sim.list()?, format)?;
             Ok(())
         }
         Command::Session { udid, device_set } => {

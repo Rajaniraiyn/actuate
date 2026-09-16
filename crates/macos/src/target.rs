@@ -1,10 +1,10 @@
 //! Resolve AX references to their actual native process, window and current geometry.
 use crate::{Accessibility, accessibility::attribute, error};
+use actuate::{Effect, ElementRef, Point, Result, geometry::Rect};
 use objc2_application_services::{AXError, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{CFArray, CFBoolean, CFRetained, CFString, CGPoint, CGSize};
 use serde::{Deserialize, Serialize};
 use std::ptr::{self, NonNull};
-use unimation::{Effect, ElementRef, Point, Result, geometry::Rect};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AxWindow {

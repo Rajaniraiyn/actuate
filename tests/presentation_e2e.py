@@ -94,7 +94,7 @@ def run():
         print('PASS short-reference SkyLight click consumed by newly scrolled-into-view native button')
         request = {'id': 'transport', 'op': 'observe', 'request': {'pid': fixture.pid}}
         for output_format in ['text', 'compact']:
-            output = subprocess.check_output(['target/debug/unimation', 'session', '--format', output_format],
+            output = subprocess.check_output(['target/debug/actuate', 'session', '--format', output_format],
                                              input=json.dumps(request)+'\n', text=True, timeout=30)
             if output_format == 'text':
                 assert '--- response id="transport" ---' in output and '- @e' in output

@@ -16,7 +16,7 @@ SIMCTL = '/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/
 class Session:
     def __init__(self, device_set, udid):
         self.process = subprocess.Popen(
-            ['target/debug/unimation', '--provider', 'ios', '--device-set', str(device_set), '--device', udid, 'session', '--json'],
+            ['target/debug/actuate', '--provider', 'ios', '--device-set', str(device_set), '--device', udid, 'session', '--json'],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
@@ -87,12 +87,12 @@ def exercise(device_set, udid, image):
 
 if __name__ == '__main__':
     runtime = next(r for r in json.loads(subprocess.check_output([SIMCTL,'list','runtimes','--json']))['runtimes'] if r.get('isAvailable') and r.get('platform') == 'iOS')
-    with tempfile.TemporaryDirectory(prefix='unimation-ios-e2e-') as directory:
+    with tempfile.TemporaryDirectory(prefix='actuate-ios-e2e-') as directory:
         device_set = Path(directory)
         for family in ['iPhone','iPad']:
             device_type = next(t for t in runtime['supportedDeviceTypes'] if t['productFamily'] == family)
             command = [SIMCTL, '--set', directory]
-            udid = subprocess.check_output(command + ['create', 'Unimation disposable ' + family, device_type['identifier'], runtime['identifier']], text=True).strip()
+            udid = subprocess.check_output(command + ['create', 'Actuate disposable ' + family, device_type['identifier'], runtime['identifier']], text=True).strip()
             try:
                 subprocess.run(command + ['bootstatus', udid, '-b'], check=True, timeout=180)
                 print('Testing', family, udid, flush=True)

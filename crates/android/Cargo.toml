@@ -8,7 +8,7 @@ license.workspace = true
 default = ["usb"]
 usb = ["droidmux/usb"]
 [dependencies]
-unimation.workspace = true
+actuate.workspace = true
 serde.workspace = true
 rand = "0.8"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }

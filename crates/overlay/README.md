@@ -1,8 +1,8 @@
 # Agent cursor overlay
 
-`overlay` provides a platform-independent cursor command protocol, animation interpolation and helper process controller. Its `unimation-overlay` executable renders on macOS using current objc2 AppKit bindings and on Linux through a Wayland layer-shell surface; the Linux renderer is also available in-process as `overlay::linux::LayerCursor`. Windows, iOS/iPadOS and Android renderer placeholders return `cursor_renderer_unavailable` without side effects. It starts hidden. It never posts input events or changes the shared cursor. Input delivery remains a separate provider.
+`overlay` provides a platform-independent cursor command protocol, animation interpolation and helper process controller. Its `actuate-overlay` executable renders on macOS using current objc2 AppKit bindings and on Linux through a Wayland layer-shell surface; the Linux renderer is also available in-process as `overlay::linux::LayerCursor`. Windows, iOS/iPadOS and Android renderer placeholders return `cursor_renderer_unavailable` without side effects. It starts hidden. It never posts input events or changes the shared cursor. Input delivery remains a separate provider.
 
-Build with `cargo build -p overlay`. The development binary is `target/debug/unimation-overlay`; installed integrations should pass an explicit executable path.
+Build with `cargo build -p overlay`. The development binary is `target/debug/actuate-overlay`; installed integrations should pass an explicit executable path.
 
 Send one JSON object per stdin line:
 
@@ -27,9 +27,9 @@ Unit tests cover interpolation endpoints/midpoint, negative desktop coordinate c
 
 ## Library integration
 
-`OverlayController` owns the platform-independent subprocess lifecycle and bounded queue. It implements `unimation::CursorVisualization` using the serialized `CursorCommand` type. `macos::overlay::OverlayController` remains a compatibility reexport. The controller can host any executable implementing the existing JSONL wire format; it does not select an input backend or inject events.
+`OverlayController` owns the platform-independent subprocess lifecycle and bounded queue. It implements `actuate::CursorVisualization` using the serialized `CursorCommand` type. `macos::overlay::OverlayController` remains a compatibility reexport. The controller can host any executable implementing the existing JSONL wire format; it does not select an input backend or inject events.
 
-Native renderers own desktop coordinate conversion, windows and event loops. The shared `unimation::motion::sample` function supplies bounded curved motion; there is no separate interpolation implementation. Platform renderers decide when to draw each frame. A future renderer may report `Rendered` only when it can acknowledge presentation. The current stdin transport cannot do that.
+Native renderers own desktop coordinate conversion, windows and event loops. The shared `actuate::motion::sample` function supplies bounded curved motion; there is no separate interpolation implementation. Platform renderers decide when to draw each frame. A future renderer may report `Rendered` only when it can acknowledge presentation. The current stdin transport cannot do that.
 
 
 ## Updated renderer validation

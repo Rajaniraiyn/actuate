@@ -2,16 +2,16 @@
 //! keyboard protocols. These move the shared seat pointer and type into
 //! whatever surface has keyboard focus; there is no per-window delivery.
 use crate::keymap::{self, UnicodeKeymap, XKB_OFFSET};
+use actuate::{
+    Delivery, KeyChord, KeyboardInput, Modifiers, MouseButton, NativeError, Point, PointerAction,
+    PointerInput, Receipt, Result, TextInput, motion::MotionPlan,
+};
 use compositor::wayland::{Desktop, Outputs, SeatKeymap, fail};
 use std::{
     collections::HashMap,
     io::Write,
     os::fd::AsFd,
     time::{Duration, Instant},
-};
-use unimation::{
-    Delivery, KeyChord, KeyboardInput, Modifiers, MouseButton, NativeError, Point, PointerAction,
-    PointerInput, Receipt, Result, TextInput, motion::MotionPlan,
 };
 use wayland_client::protocol::{wl_keyboard, wl_pointer};
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
@@ -207,7 +207,7 @@ impl WaylandInput {
             return Ok(());
         }
         let keyboard = self.keyboard()?;
-        let fd = rustix::fs::memfd_create("unimation-keymap", rustix::fs::MemfdFlags::CLOEXEC)
+        let fd = rustix::fs::memfd_create("actuate-keymap", rustix::fs::MemfdFlags::CLOEXEC)
             .map_err(fail)?;
         let mut file = std::fs::File::from(fd);
         file.write_all(text.as_bytes()).map_err(fail)?;

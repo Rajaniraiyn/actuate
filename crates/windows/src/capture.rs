@@ -1,5 +1,5 @@
+use actuate::Result;
 use serde_json::{Value, json};
-use unimation::Result;
 use windows_api::Win32::Graphics::Gdi::*;
 
 struct Context {
@@ -146,7 +146,7 @@ pub fn capture_desktop(path: &str) -> Result<Value> {
 
 #[derive(Default)]
 pub struct DesktopCapture;
-impl unimation::Capture for DesktopCapture {
+impl actuate::Capture for DesktopCapture {
     type Request = String;
     type Frame = Value;
     fn capture(&mut self, path: String) -> Result<Value> {

@@ -11,7 +11,7 @@ import threading
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default="target/debug/unimation")
+    parser.add_argument("--binary", default="target/debug/actuate")
     parser.add_argument("--pid", type=int, help="Optional application accessibility scope")
     parser.add_argument("--capture", action="store_true", help="Also save a desktop screenshot")
     parser.add_argument("--output", type=pathlib.Path)
@@ -19,7 +19,7 @@ def main():
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
-    output = args.output or pathlib.Path(tempfile.mkdtemp(prefix="unimation-desktop-"))
+    output = args.output or pathlib.Path(tempfile.mkdtemp(prefix="actuate-desktop-"))
     output.mkdir(parents=True, exist_ok=True)
     replies = queue.Queue()
     transcript = []
