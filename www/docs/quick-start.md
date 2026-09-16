@@ -49,10 +49,10 @@ same process. Replace `@e1` with an actual returned reference:
 ## Act, then observe
 
 Choose an action the element advertises. For example, a Windows UIA button may
-support `Invoke`:
+support `invoke`:
 
 ```json
-{"op":"semantic","target":"@e1","action":{"kind":"perform","name":"Invoke"}}
+{"op":"semantic","target":"@e1","action":{"kind":"perform","name":"invoke"}}
 ```
 
 This is a Windows example, not a portable action name. On macOS an AX button

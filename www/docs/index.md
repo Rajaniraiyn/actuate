@@ -1,15 +1,26 @@
 ---
-title: Introduction
+title: Actuate
 description: Inspect native apps and control windows with Actuate. Start with Rust providers, the CLI, or a persistent session for your agent.
 ---
 
-Actuate inspects interfaces and controls native apps, windows, and desktops.
-Use its Rust libraries directly, run the CLI, or keep a persistent session open
-for repeated observations and actions.
+Native control for your agents and applications.
 
-Start with [installation](/installation) and the [quick start](/quick-start).
-The workflow is to discover a target, observe its interface, act through a
-supported route, and observe the result.
+Actuate is a native UI automation toolkit. Inspect interfaces and orchestrate
+interactions across platforms. Compose Rust providers in your code, run the CLI,
+or keep a persistent session open for your agent.
+
+## Get started
+
+After [building Actuate](/installation), inspect what is available on your host:
+
+```sh
+actuate capabilities
+actuate discover
+actuate session --json
+```
+
+The [quick start](/quick-start) walks through discovery, observation, and an action
+in one session.
 
 ## Choose how to use it
 
@@ -20,15 +31,12 @@ supported route, and observe the result.
 | [TypeScript](/build/typescript) and [Python](/build/python) | Proposed SDKs |
 | [MCP, skills, and agent plugins](/connect) | Planned integrations |
 
-## Target explicitly
+## Learn the workflow
 
-An accessibility action, a window-directed pointer event, and shared desktop
-input have different effects. Query the selected provider's capabilities before
-choosing a route. Do not assume that an accessibility action leaves focus alone.
-
-Actuate keeps native handles inside providers. Element references belong to the
-session that observed them. A dispatched action is not proof that an app accepted
-it. Read [targeting and references](/automate/targeting) before writing a loop.
+- Read [snapshots](/guides/snapshots) and select [targets](/automate/targeting).
+- Choose an [input route and cursor](/guides/input-and-cursors).
+- Handle [file dialogs and drag-and-drop](/guides/files-and-dialogs).
+- Interpret [errors and effects](/guides/errors) before deciding whether to retry.
 
 ## Platform coverage
 

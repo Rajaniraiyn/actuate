@@ -20,15 +20,5 @@ Window bounds, screenshot pixels, and desktop coordinates are different units.
 Use frame mappings and explicit conversions. A point from an old screenshot may
 be stale after a window moves or a display changes scale.
 
-## Partial observations
-
-Traversal budgets and native read errors can leave a snapshot incomplete.
-An absent element in that snapshot does not prove that it disappeared. Preserve
-coverage and issue fields when filtering or presenting observations.
-
-## Cursor overlays
-
-The soft cursor shows an interaction position. It does not send input by itself
-or prove an app consumed an action. Window and display scope have different
-visibility rules. Physical cursor hiding is currently a Windows option; it is
-not a cross-platform guarantee.
+See [snapshots](/guides/snapshots) for partial observations and
+[input and cursors](/guides/input-and-cursors) for visualization scope.

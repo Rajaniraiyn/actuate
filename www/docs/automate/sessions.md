@@ -17,8 +17,7 @@ Malformed JSON does not end the session.
 ```
 
 Replies contain either `result` or an `error` with `code`, `message`, and `effect`.
-The effect distinguishes no native mutation, dispatched input, and an unknown
-outcome. Preserve it when handling errors.
+See [errors and effects](/guides/errors) for recovery behavior.
 
 ## Reference lifetime
 
@@ -31,12 +30,6 @@ session; there is no shared background daemon in the current CLI.
 Inspect a reference to learn its native action names before calling `semantic`.
 Pointer, keyboard, and text input use an explicit delivery mode. Supported modes
 vary by provider. Cursor visualization is separate from input delivery.
-
-## Verify effects
-
-A dispatch receipt means input was sent. Observe the app again to verify its
-result. If a timeout or error reports an unknown effect, do not retry blindly.
-The original action may have succeeded.
 
 The [protocol specification](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/session.md)
 lists requests and provider extensions. `actuate protocol` prints the same

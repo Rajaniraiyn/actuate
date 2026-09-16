@@ -1,6 +1,6 @@
 # Actuate website
 
-The landing page and documentation use [Blume](https://useblume.dev/), pinned in
+The documentation uses [Blume](https://useblume.dev/), pinned in
 `bun.lock`. Use Bun 1.4.0 or newer for both package management and the runtime.
 
 ```sh
@@ -18,7 +18,8 @@ bun run audit
 bun run preview
 ```
 
-Write reader guides in `docs/` and the landing page in `pages/index.astro`.
+Write Markdown in `docs/`. `docs/index.md` is the site's welcome page.
+Blume generates the layout, navigation, search, and page metadata.
 Keep implementation research and validation records in `../_specs/`.
 Generated files stay in `.blume/` and `dist/`; do not commit them.
 
