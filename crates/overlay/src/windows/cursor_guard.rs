@@ -74,6 +74,7 @@ pub struct Guard {
 impl Guard {
     pub fn start() -> io::Result<Self> {
         let mut child = Command::new(std::env::current_exe()?)
+            .arg("overlay")
             .arg("--cursor-visibility-guard")
             .creation_flags(0x08000000)
             .stdin(Stdio::piped())

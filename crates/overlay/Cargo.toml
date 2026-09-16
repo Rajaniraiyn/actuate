@@ -28,9 +28,6 @@ libc = "0.2"
 objc2-core-foundation = "0.3.2"
 block2 = "0.6.2"
 
-[[bin]]
-name = "actuate-overlay"
-path = "src/main.rs"
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-application-services]
 version = "0.3.2"

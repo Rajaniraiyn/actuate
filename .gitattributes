@@ -1,0 +1,14 @@
+* text=auto
+*.rs text eol=lf
+*.toml text eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.mjs text eol=lf
+*.md text eol=lf
+vendor/** linguist-vendored
+vendor/sources/** -text
+_specs/** linguist-documentation
+www/docs/** linguist-documentation
+Cargo.lock linguist-generated
+**/bun.lock linguist-generated
+**/uv.lock linguist-generated

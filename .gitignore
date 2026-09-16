@@ -6,3 +6,11 @@ __pycache__/
 /www/node_modules/
 /www/.blume/
 /www/dist/
+/bindings/typescript/node_modules/
+/bindings/typescript/dist/
+/bindings/typescript/native/
+/bindings/python/.venv/
+/bindings/python/actuate/*.pyd
+/bindings/python/actuate/*.so
+/bindings/python/dist/
+.mypy_cache/

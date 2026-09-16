@@ -49,7 +49,7 @@ about incomplete traversal and omitted data.
 
 ## Contribute
 
-The repository's [technical specifications](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/README.md)
+The repository's [technical specifications](https://github.com/Rajaniraiyn/actuate/blob/main/_specs/README.md)
 contain protocol details, proposed interfaces, and provider validation instructions.
-The [SDK design](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/language-api-design.md)
+The [SDK design](https://github.com/Rajaniraiyn/actuate/blob/main/_specs/language-api-design.md)
 covers extension registration, middleware, and language conventions.

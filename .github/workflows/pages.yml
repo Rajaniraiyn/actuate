@@ -23,9 +23,9 @@ jobs:
       pages: read
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: jdx/mise-action@v4
         with:
-          bun-version: 1.4.0
+          install_args: bun
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v6

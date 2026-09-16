@@ -1,0 +1,57 @@
+[tools]
+bun = "1.4.0"
+uv = "0.12.15"
+python = "3.13.15"
+rust = { version = "1.98.0", components = "clippy,rustfmt" }
+
+[tasks.setup]
+description = "Install locked JavaScript and Python development dependencies"
+run = ["bun install --cwd www --frozen-lockfile", "bun install --cwd bindings/typescript --frozen-lockfile --ignore-scripts", "uv sync --project bindings/python --locked --no-install-project"]
+
+[tasks.build]
+description = "Build the CLI and native language bindings"
+run = "cargo build --locked -p cli -p actuate-napi -p actuate-python"
+
+[tasks.stage]
+description = "Stage local native modules for binding development"
+depends = ["build"]
+run = "uv run --project bindings/python --no-sync python scripts/package-release.py --stage --profile debug"
+
+[tasks."test:rust"]
+run = "cargo test --locked -p actuate -p actuate-bindings -p overlay"
+
+[tasks."test:typescript"]
+dir = "bindings/typescript"
+run = ["bun run build", "bun run typecheck", "bun test"]
+
+[tasks."test:python"]
+env.PYTHONPATH = "{{config_root}}/bindings/python"
+run = "uv run --project bindings/python --no-sync python -m unittest discover -s bindings/python/tests -v"
+
+[tasks.test]
+depends = ["test:rust", "test:typescript", "test:python"]
+
+[tasks.lint]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked -p cli -p actuate-bindings -p actuate-napi -p actuate-python --all-targets -- -D warnings"]
+
+[tasks.docs]
+dir = "www"
+run = ["bun run validate", "bun run build", "bun run audit"]
+
+[tasks."release:build"]
+run = ["cargo build --locked --release -p cli -p actuate-napi -p actuate-python", "uv run --project bindings/python --no-sync python scripts/package-release.py --stage"]
+
+[tasks."release:wheel"]
+dir = "bindings/python"
+run = "uv run --no-sync maturin build --release --out ../../target/release-assets --compatibility linux"
+
+[tasks."release:typescript"]
+dir = "bindings/typescript"
+run = ["bun run build", "bun pm pack --destination ../../target/release-assets --ignore-scripts"]
+
+[tasks."release:sdist"]
+dir = "bindings/python"
+run = "uv build --sdist --out-dir ../../target/release-assets"
+
+[tasks."release:manifest"]
+run = "uv run --project bindings/python --no-sync python scripts/package-release.py --manifest"

@@ -4,8 +4,8 @@ export default defineConfig({
   title: "Actuate",
   description: "Native UI automation for agents and applications. Compose Rust providers or automate through the CLI and persistent sessions.",
   content: { root: "docs" },
-  logo: { image: "/favicon.svg", text: "Actuate", href: "/" },
-  github: { owner: "Rajaniraiyn", repo: "actuate", branch: "docs", dir: "www" },
+  logo: { text: "Actuate", href: "/" },
+  github: { owner: "Rajaniraiyn", repo: "actuate", branch: "main", dir: "www" },
   theme: { accent: "violet", radius: "md", mode: "system" },
   navigation: {
     sidebar: [

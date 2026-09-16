@@ -103,6 +103,18 @@ enum Shell {
 }
 #[derive(Subcommands)]
 enum Command {
+    /// Render cursor commands from stdin without delivering input.
+    Overlay {
+        #[usage(long)]
+        hide_cursor_within_scope: bool,
+        #[usage(long)]
+        hide_cursor_while_visible: bool,
+        #[usage(long)]
+        track_physical_pointer: bool,
+        #[usage(long)]
+        cursor_visibility_guard: bool,
+    },
+
     /// Android connection setup; device automation uses shared commands.
     #[cfg(feature = "android")]
     Android {
@@ -251,6 +263,34 @@ struct Connection {
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::parse();
+    if let Command::Overlay {
+        hide_cursor_within_scope,
+        hide_cursor_while_visible,
+        track_physical_pointer,
+        cursor_visibility_guard,
+    } = app.command
+    {
+        if hide_cursor_within_scope && hide_cursor_while_visible {
+            return Err("Choose one physical cursor policy".into());
+        }
+        let options = overlay::RunOptions {
+            physical_cursor: if hide_cursor_within_scope {
+                overlay::PhysicalCursorPolicy::HideWithinScope
+            } else if hide_cursor_while_visible {
+                overlay::PhysicalCursorPolicy::HideWhileVisible
+            } else {
+                overlay::PhysicalCursorPolicy::Preserve
+            },
+            tracking: if track_physical_pointer {
+                overlay::CursorTracking::PhysicalPointer
+            } else {
+                overlay::CursorTracking::Commands
+            },
+            visibility_guard: cursor_visibility_guard,
+        };
+        return overlay::run(options).map_err(Into::into);
+    }
+
     let format = if app.json {
         actuate::OutputFormat::Json
     } else {
@@ -556,7 +596,8 @@ fn run_host(
         | Command::Diff { .. }
         | Command::Query { .. }
         | Command::View { .. }
-        | Command::Session {} => unreachable!(),
+        | Command::Session {}
+        | Command::Overlay { .. } => unreachable!(),
         #[cfg(feature = "android")]
         Command::Android { .. } => unreachable!(),
         #[cfg(feature = "idevice")]

@@ -1,0 +1,7 @@
+[source."git+https://github.com/poapoauu/DroidMux?rev=d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e"]
+git = "https://github.com/poapoauu/DroidMux"
+rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e"
+replace-with = "vendored-droidmux"
+
+[source.vendored-droidmux]
+directory = "vendor/sources"

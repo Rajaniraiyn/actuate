@@ -31,7 +31,7 @@ Inspect a reference to learn its native action names before calling `semantic`.
 Pointer, keyboard, and text input use an explicit delivery mode. Supported modes
 vary by provider. Cursor visualization is separate from input delivery.
 
-The [protocol specification](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/session.md)
+The [protocol specification](https://github.com/Rajaniraiyn/actuate/blob/main/_specs/session.md)
 lists requests and provider extensions. `actuate protocol` prints the same
 embedded specification. Consult the selected platform's capabilities before
 using an extension.

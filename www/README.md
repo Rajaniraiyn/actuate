@@ -4,18 +4,16 @@ The documentation uses [Blume](https://useblume.dev/), pinned in
 `bun.lock`. Use Bun 1.4.0 or newer for both package management and the runtime.
 
 ```sh
-cd www
-bun install --frozen-lockfile
-bun run dev
+mise install
+mise run setup
+bun run --cwd www dev
 ```
 
 Before publishing:
 
 ```sh
-bun run validate
-bun run build
-bun run audit
-bun run preview
+mise run docs
+bun run --cwd www preview
 ```
 
 Write Markdown in `docs/`. `docs/index.md` is the site's welcome page.
@@ -30,3 +28,5 @@ come from GitHub Pages metadata, including account-level custom domains.
 
 The static site includes local search and Markdown exports. Its AI assistant
 and MCP server are disabled because GitHub Pages cannot run their server code.
+
+The header uses a text wordmark. The empty favicon suppresses Blume's default mark.

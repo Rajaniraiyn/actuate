@@ -11,7 +11,6 @@ supported operations and known gaps.
 Prepare the existing patched dependencies before Cargo resolves the workspace:
 
 ```sh
-python3 scripts/prepare-deps.py
 cargo build -p cli --no-default-features
 cargo run -p cli --no-default-features -- capabilities
 ```

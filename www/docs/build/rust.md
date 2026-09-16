@@ -45,5 +45,5 @@ Providers own their native handles and enforce reference lifetimes.
 Use typed requests and explicit coordinate conversions. Do not serialize calls
 to JSON inside a Rust application when the provider already exposes a typed API.
 
-See the [composition specification](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/composition.md)
+See the [composition specification](https://github.com/Rajaniraiyn/actuate/blob/main/_specs/composition.md)
 for available traits and [Extend Actuate](/developers) for provider and transport contracts.

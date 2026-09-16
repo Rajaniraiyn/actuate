@@ -101,7 +101,7 @@ def main():
         print('PASS window-local coordinates')
         before_cursor=cursor_position()
         before_active=session.result(op='discover')['active_pid']
-        session.result(op='cursor_overlay',action={'kind':'start','executable':str(Path('target/debug/actuate-overlay').resolve())})
+        session.result(op='cursor_overlay',action={'kind':'start','executable':str(Path('target/debug/actuate').resolve())})
         try:
             session.result(op='click',target=button['reference'],mode='skylight')
             state=session.result(op='cursor_state')

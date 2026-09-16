@@ -1,0 +1,28 @@
+[package]
+name = "droidmux-shell"
+description = "Shell v2 and legacy Android shell sessions for DroidMux"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["DroidMux contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/poapoauu/DroidMux"
+publish = true
+documentation = "https://docs.rs/droidmux-shell"
+
+[dependencies]
+adb-client = { package = "droidmux-client", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-protocol = { package = "droidmux-protocol", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+bytes = "1.12.1"
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", features = ["full"] }
+
+[dev-dependencies]
+adb-auth = { package = "droidmux-auth", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-transport = { package = "droidmux-transport", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+adb-transport-tcp = { package = "droidmux-transport-tcp", version = "0.1.0", git = "https://github.com/poapoauu/DroidMux", rev = "d21e3d729a9d233fd34ce27e5c2244c45c4c9a8e" }
+async-trait = "0.1.91"
+
+
+
+[workspace]

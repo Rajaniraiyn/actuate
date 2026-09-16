@@ -1,3 +1,4 @@
+extern crate self as overlay;
 use actuate::{NativeError, Result, motion::MotionStyle};
 use serde::{Deserialize, Serialize};
 
@@ -254,4 +255,39 @@ mod tests {
         assert_eq!(error.code, "cursor_renderer_unavailable");
         assert!(matches!(error.effect, Effect::None));
     }
+}
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
+
+/// CLI renderer settings. Rendering owns the calling thread's native event loop.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RunOptions {
+    pub physical_cursor: PhysicalCursorPolicy,
+    pub tracking: CursorTracking,
+    pub visibility_guard: bool,
+}
+pub fn run(options: RunOptions) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    windows::run(options);
+    #[cfg(not(target_os = "windows"))]
+    {
+        if options.physical_cursor != PhysicalCursorPolicy::Preserve
+            || options.tracking != CursorTracking::Commands
+            || options.visibility_guard
+        {
+            return Err(NativeError::unsupported(
+                "Physical cursor policies require the Windows renderer",
+            ));
+        }
+        #[cfg(target_os = "macos")]
+        macos::run();
+        #[cfg(target_os = "linux")]
+        linux::run();
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        return Err(NativeError::unsupported("No renderer for this host"));
+    }
+    Ok(())
 }

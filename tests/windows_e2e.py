@@ -296,7 +296,7 @@ def main():
         def overlay_test():
             target = next(w for w in session.call('windows') if w['pid'] == children[0].pid and w['title'] == 'Actuate WPF fixture')
             log = (args.output / 'overlay.stderr').open('w', encoding='utf-8')
-            overlay = subprocess.Popen([str(ROOT / 'target/debug/actuate-overlay.exe')], stdin=subprocess.PIPE, stderr=log, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            overlay = subprocess.Popen([str(ROOT / 'target/debug/actuate.exe'), 'overlay'], stdin=subprocess.PIPE, stderr=log, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 for command in [dict(op='scope', scope=dict(kind='window', window_id=target['window_id'], pid=target['pid'])), dict(op='move', x=200, y=200, duration_ms=500)]:
                     overlay.stdin.write(json.dumps(command)+'\n')

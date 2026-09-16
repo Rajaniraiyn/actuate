@@ -78,6 +78,7 @@ impl OverlayController {
         }
         let path = std::fs::canonicalize(path).map_err(failure)?;
         let mut command = Command::new(path);
+        command.arg("overlay");
         if tracking == crate::CursorTracking::PhysicalPointer {
             command.arg("--track-physical-pointer");
         }

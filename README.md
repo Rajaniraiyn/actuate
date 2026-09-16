@@ -3,44 +3,91 @@
 Native control for your agents and applications.
 
 Actuate is a native UI automation toolkit. Inspect interfaces, capture screens,
-and orchestrate interactions with apps, windows, and desktops. Compose its Rust
-providers in your code or use the CLI and persistent sessions.
+and interact with apps, windows, and desktops. Compose providers in Rust, build
+with TypeScript or Python, or automate through the CLI and persistent sessions.
 
 ## Get started
 
-Build from source with Rust and Python 3.9 or newer:
+Download the archive for your platform from [GitHub Releases](https://github.com/Rajaniraiyn/actuate/releases)
+and put `actuate` on your PATH. The executable includes the cursor renderer as
+`actuate overlay`.
 
 ```sh
-python scripts/prepare-deps.py
-cargo build -p cli --no-default-features -p overlay
-cargo run -p cli --no-default-features -- capabilities
+actuate capabilities
+actuate discover
+actuate session --json
 ```
 
-The minimal build includes the host desktop provider. See the
-[installation guide](www/docs/installation.md) for native prerequisites and
-optional device features. The [quick start](www/docs/quick-start.md) covers
-discovery and persistent sessions.
+Choose an application, observe its accessibility tree, and use the actions it
+exposes. Keep a session open when later actions need references from an observation.
+The [quick start](https://rajaniraiyn.dev/actuate/quick-start/) walks through this workflow.
 
-## Choose an entry point
+## Build
 
-| Use | Available today | Planned |
+Use the same native providers from your application.
+
+| Language | API | Guide |
 | --- | --- | --- |
-| Build | [Rust providers](www/docs/build/rust.md) | TypeScript and Python SDKs |
-| Automate | [CLI](www/docs/automate/commands.md), [persistent sessions](www/docs/automate/sessions.md) | More session adapters |
-| Connect | Run the CLI through local command tools | [MCP, skills, and agent plugins](www/docs/connect/index.md) |
+| Rust | Capability traits and composable backends | [Rust](www/docs/build/rust.md) |
+| TypeScript | Typed requests, promises, and explicit session ownership | [TypeScript](www/docs/build/typescript.md) |
+| Python | Dataclasses, context managers, and synchronous or asynchronous sessions | [Python](www/docs/build/python.md) |
 
-## Platform status
+TypeScript uses napi-rs and Python uses PyO3. Both retain native state on a
+session worker and preserve provider errors, reference lifetimes, and input
+routes. Custom transports and middleware let applications add policy and tracing.
 
-Actuate is experimental. Providers exist for macOS, Linux, Windows, Android, and
-iOS and iPadOS devices and simulators. Capabilities depend on the provider,
-permissions, and OS. Query `capabilities` before acting.
+## Automate
 
-See the [platform guide](www/docs/platforms/index.md) for native routes and
-platform-specific requirements.
+Discover applications and windows, read bounded accessibility trees, capture
+screens, and compare observations. Select semantic actions or an explicit input
+route. Window-directed and global input have different focus behavior; a soft
+cursor visualizes an action without changing its delivery route.
 
-## Documentation
+See the [command reference](www/docs/automate/commands.md),
+[session protocol](www/docs/automate/sessions.md), and
+[input guide](www/docs/guides/input-and-cursors.md).
 
-- [Quick start](www/docs/quick-start.md)
-- [Extend Actuate](www/docs/developers/index.md)
-- [Architecture](architecture.md) and [technical specifications](_specs/README.md)
-- [Website development](www/README.md), built with [Blume](https://useblume.dev/)
+## Connect
+
+Agents can use local commands or keep a JSONL session open. MCP, packaged skills,
+and dedicated agent plugins are planned. The
+[integration guide](www/docs/connect/index.md) covers available entry points.
+
+## Platforms
+
+Providers support Windows, macOS, Linux, Android, and Apple devices and simulators.
+Operations depend on native permissions, the application, and the selected
+provider. Query capabilities before choosing an input route. Read the
+[platform guide](www/docs/platforms/index.md) for requirements and limits.
+
+## Development
+
+Mise pins Rust, Bun, Python, and uv. From a checkout, run:
+
+```sh
+mise install
+mise run setup
+mise run stage
+mise run test
+```
+
+Use `mise run docs` to build the documentation and `mise run release:build` to
+build distribution binaries.
+
+## Build from source
+
+```sh
+git clone https://github.com/Rajaniraiyn/actuate.git
+cd actuate
+cargo build -p cli --release --locked
+./target/release/actuate --help
+```
+
+On Windows, run `target\release\actuate.exe`. Use `--no-default-features` for a
+desktop-only build. Cargo resolves the checked-in dependency overrides without a
+preparation script. See [installation](www/docs/installation.md) for native build
+requirements and [binding development](_specs/bindings.md) for language packages.
+
+[Documentation](https://rajaniraiyn.dev/actuate/) ?
+[Extend Actuate](www/docs/developers/index.md) ?
+[Technical specifications](_specs/README.md)

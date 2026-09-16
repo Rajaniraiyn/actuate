@@ -262,7 +262,7 @@ def test_overlay(s):
     s.result(op='cursor_overlay', action={'kind': 'stop'})
     time.sleep(0.3)
     assert 'actuate-cursor' not in layer_namespaces(), layer_namespaces()
-    helper = os.path.abspath('target/debug/actuate-overlay')
+    helper = os.path.abspath('target/debug/actuate')
     state = s.result(op='cursor_overlay', action={'kind': 'start', 'executable': helper})
     assert state['overlay_running'] is True, state
     time.sleep(0.5)

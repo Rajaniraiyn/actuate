@@ -12,6 +12,7 @@ name = "actuate"
 path = "src/main.rs"
 [dependencies]
 actuate.workspace = true
+overlay.workspace = true
 macos.workspace = true
 serde_json.workspace = true
 usage.workspace = true

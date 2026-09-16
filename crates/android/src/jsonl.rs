@@ -36,7 +36,7 @@ struct CaptureRequest {
     op: CaptureOp,
     path: PathBuf,
 }
-fn dispatch<D: CommandTransport>(device: &mut Android<D>, mut request: Value) -> Result<Value> {
+pub fn dispatch<D: CommandTransport>(device: &mut Android<D>, mut request: Value) -> Result<Value> {
     if let Some(map) = request.as_object_mut() {
         map.remove("id");
     }

@@ -53,7 +53,7 @@ def frame(hwnd):
 class Overlay:
     def __init__(self, output, session, physical_cursor='preserve',tracking='commands'):
         self.session=session
-        state=session.call('cursor_overlay',action=dict(kind='start',executable=str(ROOT/'target/debug/actuate-overlay.exe'),physical_cursor=physical_cursor,tracking=tracking))
+        state=session.call('cursor_overlay',action=dict(kind='start',executable=str(ROOT/'target/debug/actuate.exe'),physical_cursor=physical_cursor,tracking=tracking))
         self.process=SimpleNamespace(pid=state['pid'])
         self.command('configure', appearance={'color': [.62,.3,.96], 'scale':1.3, 'idle': {'style':'off'}})
 
