@@ -33,15 +33,26 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
       ACTUATE_SKIP_DOWNLOAD: '1'
       CARGO_TERM_COLOR: always
+      PYTHONFAULTHANDLER: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
       - name: Install dependencies
         run: mise run setup
+      - name: Verify native Rust target
+        shell: bash
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: mise exec -- rustc -vV | grep -Fx "host: $EXPECTED_TARGET"
       - name: Build release artifacts
         run: mise run release:build
       - name: Test bindings and Rust contracts
         run: mise run test
+      - name: Diagnose macOS native test failures
+        if: failure() && runner.os == 'macOS'
+        env:
+          PYTHONPATH: bindings/python
+        run: lldb --batch -o run -o 'thread backtrace all' -- bindings/python/.venv/bin/python -m unittest discover -s bindings/python/tests -v
       - name: Build Python wheel
         run: mise run release:wheel
       - name: CLI smoke check
