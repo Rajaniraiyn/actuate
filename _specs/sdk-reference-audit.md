@@ -1,9 +1,9 @@
 # SDK and CLI reference review
 
 Reviewed 2026-09-17. These are design references, not dependencies or copied
-implementations. The public proposals live in
-[language APIs](../www/docs/design/language-apis.md) and
-[CLI design](../www/docs/design/cli.md).
+implementations. The interface proposals live in
+[language APIs](language-api-design.md) and
+[CLI design](cli-design.md).
 
 ## Source revisions
 

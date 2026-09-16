@@ -15,7 +15,7 @@ export default defineConfig({
       { label: "Guides", items: ["guides/snapshots", "guides/input-and-cursors", "guides/files-and-dialogs", "guides/errors"] },
       { label: "Connect", items: ["connect/index"] },
       { label: "Platforms", items: ["platforms/index"] },
-      { label: "Design", items: ["design/index", "design/cli", "design/language-apis"] },
+      { label: "Developers", items: ["developers/index"] },
     ],
   },
   search: { provider: "orama" },

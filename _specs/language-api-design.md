@@ -50,7 +50,7 @@ Proposed lifecycle, not executable SDK code:
 const session = await Actuate.connect({ provider: "native" });
 try {
   const snapshot = await session.observe({ pid, maxNodes: 100 });
-  const element = snapshot.roots[0];
+  const element = snapshot.root;
   const details = await session.inspect(element);
 } finally {
   await session.close();
@@ -78,7 +78,7 @@ Proposed lifecycle, not executable SDK code:
 ```python
 with Actuate.connect(provider="native") as session:
     snapshot = session.observe(pid=pid, max_nodes=100)
-    element = snapshot.roots[0]
+    element = snapshot.root
     details = session.inspect(element)
 ```
 

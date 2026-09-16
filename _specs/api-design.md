@@ -3,8 +3,8 @@ title: API design
 description: Design CLI and language adapters around shared native behavior. Preserve capabilities, target identity, coordinate spaces, delivery, and effects.
 ---
 
-These pages describe proposed interfaces. The [command reference](/automate/commands)
-and [Rust guide](/build/rust) describe what is implemented.
+These pages describe proposed interfaces. The [command reference](../www/docs/automate/commands.md)
+and [Rust guide](../www/docs/build/rust.md) describe what is implemented.
 
 The documentation flow takes cues from [agent-browser](https://agent-browser.dev/):
 installation, a short observe-and-act workflow, then focused command and session
@@ -21,5 +21,5 @@ Keep native action names available for platform-specific operations. Portable
 convenience methods should exist only where providers can report their support.
 Reject unsupported requests without changing their delivery mode.
 
-- [CLI design](/design/cli) covers command shape and persistent state.
-- [Language API design](/design/language-apis) covers Rust, TypeScript, and Python.
+- [CLI design](cli-design.md) covers command shape and persistent state.
+- [Language API design](language-api-design.md) covers Rust, TypeScript, and Python.

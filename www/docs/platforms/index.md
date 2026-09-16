@@ -1,32 +1,55 @@
 ---
 title: Platforms
-description: Compare native providers for Windows, macOS, Linux, Android, and Apple devices. Review input routes, prerequisites, and current validation limits.
+description: Choose native providers for desktop and mobile automation. Understand accessibility, input delivery, capture, and platform-specific requirements.
 ---
 
-| Platform | Implemented routes | Current limits |
+Use `actuate capabilities` on the selected host or device to find available
+operations. Permissions, OS versions, and device connections affect the result.
+
+| Platform | Accessibility | Input and capture |
 | --- | --- | --- |
-| Windows | UI Automation, native input and capture, cursor overlays, shell controls | Semantic actions can activate targets. Full shell and workspace coverage remain incomplete. |
-| macOS | Accessibility, Quartz, SkyLight window input, ScreenCaptureKit, cursor overlays | Private APIs and window attachment need OS-specific validation. |
-| Linux | AT-SPI, X11 input, supported Wayland input and capture, Hyprland targeting, overlays | Compositor protocols determine availability. Universal portal input is not implemented. |
-| Android | Direct device connections, accessibility and HID routes | Pairing, permissions, and device support vary. |
-| iOS and iPadOS | Simulator accessibility and HID; physical-device discovery and capture | Simulator and physical-device capabilities differ. |
+| Windows | UI Automation | Global SendInput, native capture, cursor overlays |
+| macOS | Accessibility API | Quartz, SkyLight window input, ScreenCaptureKit, cursor overlays |
+| Linux | AT-SPI | X11 and supported Wayland routes, compositor-dependent capture and overlays |
+| Android | Device accessibility | Device HID routes over direct connections |
+| iOS and iPadOS | Simulator accessibility | Simulator HID; physical-device discovery and capture |
 
-Query `actuate capabilities` on the selected host or device. An implementation
-does not imply that every app, OS version, display arrangement, or permission
-configuration has been tested.
+## Windows
 
-## Windows validation
+Inspect the actions a control advertises. WPF, WinForms, Win32, UWP, and Electron
+apps expose different UI Automation patterns; the application framework alone
+does not determine whether a particular control supports an action.
 
-Tests cover WPF, WinForms, Win32, and Electron fixtures, plus native Save/Open
-dialogs. Live checks include Calculator, Settings, shell controls, soft cursors,
-taskbar auto-hide, and Explorer file transfers.
+UIA semantic actions may activate their target. Pointer and keyboard input use
+the shared desktop through SendInput. A separate Task View workspace does not
+isolate Run, Start, the taskbar, or other shared shell controls from the user.
 
-Multi-display and workspace transitions, elevated dialogs, network and cloud
-files, and some shell interactions still need coverage. See the
-[Windows results](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/windows-interactive-results.md).
+Dialogs and menus may have separate top-level windows. Discover the window and
+observe its owning process. Use display-scoped cursor rendering for shell controls
+that do not belong to the application window being automated.
 
-## Implementation notes
+## macOS
 
-Read the [backend guide](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/backends.md)
-and [validation records](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/validation.md)
-for provider-specific requirements and evidence.
+Grant Accessibility permission for observation and input, and Screen Recording
+permission for capture. Window-directed delivery depends on the selected route
+and target application. Private SkyLight APIs can vary with the OS version.
+
+Inspect native action names such as `AXPress` instead of assuming Windows UIA
+names apply. Window coordinates and captured image pixels need explicit mapping.
+
+## Linux
+
+AT-SPI observation requires the desktop accessibility bus and application support.
+Input and capture depend on the display server. On Wayland, check the compositor's
+supported protocols; X11 routes do not imply equivalent Wayland capabilities.
+Hyprland has provider-specific targeting support.
+
+## Mobile devices
+
+Select the device explicitly with the [configuration options](/automate/configuration).
+Android connections depend on pairing, credentials, and device permissions.
+Apple simulator operations require an existing booted simulator and Xcode.
+Physical Apple devices expose different capabilities from simulators.
+
+See [installation](/installation) for build prerequisites and
+[input and cursors](/guides/input-and-cursors) for delivery and visualization scope.

@@ -29,14 +29,18 @@ Check the source and destination windows immediately before dragging. Use the
 native drag sequence, then verify both locations and the transferred contents.
 Do not infer copy versus move from the animation or a modifier alone.
 
-## Tested cases
+## Handle application and filesystem differences
 
-Windows fixtures cover Unicode paths, nested folders, default extensions,
-overwrite acceptance and rejection, cancellation, invalid filenames, missing
-files, and stale dialog references. Live Explorer tests verified file and folder
-moves between two windows.
+A Save dialog may append a default extension or interpret a relative filename
+against its current directory. Read back the resolved filename and check the
+saved location. For overwrite prompts, choose the confirmation explicitly and
+verify whether the original file changed.
 
-Tab-to-tab transfers, network paths, cloud placeholders, access-denied paths,
-locked files, and elevated or custom dialogs still need validation. The
-[Windows report](https://github.com/Rajaniraiyn/actuate/blob/docs/_specs/windows-interactive-results.md)
-contains the evidence and test commands.
+Network folders and cloud placeholders can delay completion after a dialog
+closes. Permission failures, locked files, and invalid names may produce another
+dialog or an inline message. Observe the application before deciding to retry.
+
+Custom file pickers may expose different controls from native dialogs. Inspect
+the available actions and values instead of assuming a fixed control order.
+For tab-to-tab transfers, select and observe the destination tab before resolving
+its drop target. Refresh coordinates after scrolling or changing tabs.

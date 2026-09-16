@@ -35,12 +35,12 @@ Actuate is experimental. Providers exist for macOS, Linux, Windows, Android, and
 iOS and iPadOS devices and simulators. Capabilities depend on the provider,
 permissions, and OS. Query `capabilities` before acting.
 
-See [platform coverage](www/docs/platforms/index.md) and the
-[validation reports](_specs/validation.md) for tested behavior and remaining work.
+See the [platform guide](www/docs/platforms/index.md) for native routes and
+platform-specific requirements.
 
 ## Documentation
 
 - [Quick start](www/docs/quick-start.md)
-- [CLI and language API design](www/docs/design/index.md)
+- [Extend Actuate](www/docs/developers/index.md)
 - [Architecture](architecture.md) and [technical specifications](_specs/README.md)
 - [Website development](www/README.md), built with [Blume](https://useblume.dev/)

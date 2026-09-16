@@ -57,8 +57,8 @@ actuate spec
 actuate completions zsh
 ```
 
-Actions currently use the [session protocol](/automate/sessions). Standalone
-`click`, `fill`, and named-daemon commands are [proposed](/design/cli), not current CLI commands.
+Use the [session protocol](/automate/sessions) to inspect references and perform
+actions within the process that owns them.
 
 ## Output
 

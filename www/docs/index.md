@@ -2,7 +2,7 @@
 title: Actuate
 description: Inspect native apps and control windows with Actuate. Start with Rust providers, the CLI, or a persistent session for your agent.
 seo:
-  title: Actuate | Native UI automation
+  title: Native UI automation
 ---
 
 Native control for your agents and applications.
@@ -30,7 +30,7 @@ in one session.
 | --- | --- |
 | [Rust](/build/rust) | Available from source |
 | [CLI](/automate/commands) and [sessions](/automate/sessions) | Available from source |
-| [TypeScript](/build/typescript) and [Python](/build/python) | Proposed SDKs |
+| [TypeScript](/build/typescript) and [Python](/build/python) | SDK previews |
 | [MCP, skills, and agent plugins](/connect) | Planned integrations |
 
 ## Learn the workflow
@@ -43,7 +43,7 @@ in one session.
 ## Platform coverage
 
 Providers exist for Windows, macOS, Linux, Android, and Apple devices and
-simulators. Their capabilities and validation differ. The
-[platform guide](/platforms) records those limits.
+simulators. Their capabilities differ. The
+[platform guide](/platforms) describes their requirements and delivery routes.
 
-The [API design pages](/design) describe proposed CLI and language interfaces.
+To add a provider or transport adapter, see [Extend Actuate](/developers).

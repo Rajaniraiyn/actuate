@@ -9,6 +9,9 @@ and test reports. Reader-facing documentation lives in [www/docs](../www/docs).
 - [Validation](validation.md)
 - [Windows interactive results](windows-interactive-results.md)
 - [Dependency preparation](dependencies.md)
+- [API design](api-design.md)
+- [Language API design](language-api-design.md)
+- [CLI design](cli-design.md)
 - [SDK and CLI reference review](sdk-reference-audit.md)
 
 Keep protocol details here and user workflows in `www/docs`. The CLI parser owns
