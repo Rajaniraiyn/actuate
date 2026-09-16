@@ -27,7 +27,7 @@ export default defineConfig({
   seo: { sitemap: true, robots: true, structuredData: true, og: { enabled: true } },
   deployment: {
     output: "static",
-    site: process.env.PAGES_ORIGIN || "https://rajaniraiyn.dev",
+    site: (process.env.PAGES_ORIGIN || "https://rajaniraiyn.dev").replace(/^http:/, "https:"),
     base: process.env.PAGES_BASE_PATH ?? "/actuate",
   },
 });

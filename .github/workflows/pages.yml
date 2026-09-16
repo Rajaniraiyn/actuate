@@ -35,15 +35,14 @@ jobs:
       - name: Validate links
         working-directory: www
         run: bun run validate
-      - name: Build
+      - name: Build and audit
         working-directory: www
         env:
           PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
-        run: bun run build
-      - name: Audit output
-        working-directory: www
-        run: bun run audit
+        run: |
+          bun run build
+          bun run audit
       - uses: actions/upload-pages-artifact@v5
         with:
           path: www/dist

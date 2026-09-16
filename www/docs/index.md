@@ -1,6 +1,8 @@
 ---
 title: Actuate
 description: Inspect native apps and control windows with Actuate. Start with Rust providers, the CLI, or a persistent session for your agent.
+seo:
+  title: Actuate | Native UI automation
 ---
 
 Native control for your agents and applications.
