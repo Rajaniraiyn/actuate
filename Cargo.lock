@@ -41,6 +41,7 @@ version = "0.1.0"
 dependencies = [
  "actuate-bindings",
  "pyo3",
+ "pyo3-build-config",
  "serde_json",
 ]
 

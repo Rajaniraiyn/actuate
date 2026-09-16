@@ -10,6 +10,7 @@ run = ["bun install --cwd www --frozen-lockfile", "bun install --cwd bindings/ty
 
 [tasks.build]
 description = "Build the CLI and native language bindings"
+env.PYO3_BUILD_EXTENSION_MODULE = "1"
 run = "cargo build --locked -p cli -p actuate-napi -p actuate-python"
 
 [tasks.stage]
@@ -39,6 +40,7 @@ dir = "www"
 run = ["bun run validate", "bun run build", "bun run audit"]
 
 [tasks."release:build"]
+env.PYO3_BUILD_EXTENSION_MODULE = "1"
 run = ["cargo build --locked --release -p cli -p actuate-napi -p actuate-python", "uv run --project bindings/python --no-sync python scripts/package-release.py --stage"]
 
 [tasks."release:wheel"]

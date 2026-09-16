@@ -43,7 +43,8 @@ jobs:
         shell: bash
         env:
           EXPECTED_TARGET: ${{ matrix.target }}
-        run: mise exec -- rustc -vV | grep -Fx "host: $EXPECTED_TARGET"
+        run: |
+          mise exec -- rustc -vV | grep -Fx "host: $EXPECTED_TARGET"
       - name: Build release artifacts
         run: mise run release:build
       - name: Test bindings and Rust contracts
