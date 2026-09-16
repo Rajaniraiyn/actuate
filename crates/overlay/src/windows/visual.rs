@@ -44,6 +44,20 @@ impl State {
         self.to.0 += x;
         self.to.1 += y;
     }
+    /// Physical tracking overrides window rebasing and queued visual movement.
+    /// An unchanged position leaves the idle clock alone.
+    pub fn track_pointer(&mut self, point: (f64, f64), now: Instant) {
+        if self.position(now) != point || !self.duration.is_zero() {
+            self.command(
+                CursorCommand::Move {
+                    x: point.0,
+                    y: point.1,
+                    duration_ms: 0,
+                },
+                now,
+            );
+        }
+    }
     pub fn command(&mut self, command: CursorCommand, now: Instant) -> bool {
         match command {
             CursorCommand::Move { x, y, duration_ms } => {
@@ -140,18 +154,23 @@ impl State {
         )?);
         pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, transform, None);
         if let Some(clicked) = self.click {
-            let t = now.duration_since(clicked).as_secs_f32() / 0.55;
-            if t < 1. {
-                let radius = (5. + t * 18.) * dpi_scale as f32;
+            let t = now.duration_since(clicked).as_secs_f64() / overlay::ripple::DURATION_SECONDS;
+            if let Some(sample) = overlay::ripple::sample(t, self.appearance.motion) {
+                let radius = (sample.radius * self.appearance.scale * dpi_scale) as f32;
                 let mut ring = PathBuilder::new();
                 ring.push_circle(center, center, radius);
                 if let Some(path) = ring.finish() {
-                    paint.set_color_rgba8(75, 151, 230, ((1. - t) * 150.) as u8);
+                    paint.set_color(Color::from_rgba(
+                        self.appearance.color[0] as f32,
+                        self.appearance.color[1] as f32,
+                        self.appearance.color[2] as f32,
+                        sample.alpha as f32,
+                    )?);
                     pixmap.stroke_path(
                         &path,
                         &paint,
                         &Stroke {
-                            width: 1.5 * dpi_scale as f32,
+                            width: (sample.width * self.appearance.scale * dpi_scale) as f32,
                             ..Default::default()
                         },
                         Transform::identity(),
@@ -161,5 +180,34 @@ impl State {
             }
         }
         Some(pixmap)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physical_tracking_overrides_window_translation_and_animation() {
+        let now = Instant::now();
+        let mut state = State::new(now);
+        let pointer = (100.0, 200.0);
+        state.track_pointer(pointer, now);
+        state.translate(50.0, -20.0);
+        state.track_pointer(pointer, now);
+        assert_eq!(state.position(now), pointer);
+        state.command(
+            CursorCommand::Move {
+                x: 900.0,
+                y: 800.0,
+                duration_ms: 1000,
+            },
+            now,
+        );
+        state.track_pointer(pointer, now);
+        assert_eq!(state.position(now + Duration::from_millis(500)), pointer);
+        let activity = state.activity;
+        state.track_pointer(pointer, now + Duration::from_secs(2));
+        assert_eq!(state.activity, activity);
     }
 }

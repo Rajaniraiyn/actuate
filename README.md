@@ -6,7 +6,9 @@ Composable UI automation in Rust, with a CLI for agents. Inspect interfaces, tak
 screenshots, click, type, scroll, and compare snapshots.
 
 macOS, Linux, Windows, Android, iOS, and iPadOS. Experimental; capabilities vary by
-platform and are reported by `capabilities`. Windows has compile checks only.
+platform and are reported by `capabilities`. Windows has limited
+[native fixture validation](docs/windows-host-results.md); background focus
+safety and full shell coverage remain incomplete.
 
 ## Get started
 

@@ -3,8 +3,25 @@ use unimation::{NativeError, Result, motion::MotionStyle};
 
 mod controller;
 pub mod idle;
+pub mod ripple;
 pub mod shape;
-pub use controller::OverlayController;
+pub use controller::{OverlayController, OverlayState};
+/// Physical-pointer visibility is an explicit effect, separate from decoration.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalCursorPolicy {
+    #[default]
+    Preserve,
+    HideWithinScope,
+    HideWhileVisible,
+}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorTracking {
+    #[default]
+    Commands,
+    PhysicalPointer,
+}
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

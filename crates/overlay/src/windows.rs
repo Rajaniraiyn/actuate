@@ -25,6 +25,13 @@ use windows_api::{
 
 // Binary entry point. Native resources stay on the COM/UI thread.
 pub fn run() {
+    if std::env::args().nth(1).as_deref() == Some("--cursor-visibility-guard") {
+        if let Err(error) = cursor_guard::run() {
+            eprintln!("Cursor visibility guard: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(error) = run_native() {
         eprintln!("Windows cursor renderer: {error}");
         std::process::exit(1);
@@ -296,11 +303,58 @@ unsafe fn placement(
     }
 }
 
+mod cursor_guard;
 mod visual;
+fn guard_update(guard: &mut Option<cursor_guard::Guard>, hide: bool) -> Result<()> {
+    if let Some(guard) = guard {
+        guard.update(hide).map_err(|error| {
+            Error::new(
+                windows_api::core::HRESULT(0x80004005_u32 as i32),
+                error.to_string(),
+            )
+        })?;
+    }
+    Ok(())
+}
 fn run_native() -> Result<()> {
     unsafe {
         let _environment = Environment::new()?;
+        let mut policy = overlay::PhysicalCursorPolicy::Preserve;
+        let mut tracking = false;
+        for argument in std::env::args().skip(1) {
+            match argument.as_str() {
+                "--hide-cursor-within-scope" => {
+                    policy = overlay::PhysicalCursorPolicy::HideWithinScope
+                }
+                "--hide-cursor-while-visible" => {
+                    policy = overlay::PhysicalCursorPolicy::HideWhileVisible
+                }
+                "--track-physical-pointer" => tracking = true,
+                _ => {
+                    return Err(Error::new(
+                        windows_api::core::HRESULT(0x80070057_u32 as i32),
+                        "Unknown overlay option",
+                    ));
+                }
+            }
+        }
+        let mut guard = if policy == overlay::PhysicalCursorPolicy::Preserve {
+            None
+        } else {
+            Some(cursor_guard::Guard::start().map_err(|error| {
+                Error::new(
+                    windows_api::core::HRESULT(0x80004005_u32 as i32),
+                    error.to_string(),
+                )
+            })?)
+        };
         let window = create_window()?;
+        // Register a transparent window with the shell before querying its
+        // virtual desktop. A never-shown HWND may return TYPE_E_ELEMENTNOTFOUND.
+        let mut initial = Bitmap::new(1, 1)?;
+        initial.upload(&[0, 0, 0, 0], POINT::default(), None);
+        initial.present(window.0, POINT::default())?;
+        let _ = ShowWindow(window.0, SW_SHOWNOACTIVATE);
         let desktops: Option<IVirtualDesktopManager> =
             CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_INPROC_SERVER).ok();
         let (sender, receiver) = mpsc::sync_channel(128);
@@ -370,6 +424,14 @@ fn run_native() -> Result<()> {
                     Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
                 }
             }
+            if tracking && state.visible {
+                let mut pointer = POINT::default();
+                GetCursorPos(&mut pointer)?;
+                state.track_pointer(
+                    (pointer.x as f64, pointer.y as f64),
+                    std::time::Instant::now(),
+                );
+            }
             if previous_scope != state.scope {
                 let _ = ShowWindow(window.0, SW_HIDE);
                 SetWindowPos(
@@ -387,6 +449,7 @@ fn run_native() -> Result<()> {
             }
             let placement = placement(state.scope, window.0, desktops.as_ref());
             if !state.visible || placement.is_none() {
+                guard_update(&mut guard, false)?;
                 let _ = ShowWindow(window.0, SW_HIDE);
                 if state.visible && !unavailable {
                     eprintln!(
@@ -406,18 +469,47 @@ fn run_native() -> Result<()> {
                     CursorScope::Window { window_id, .. } => HWND(window_id as usize as *mut _),
                     CursorScope::Desktop => GetForegroundWindow(),
                 };
-                if !desktops
-                    .IsWindowOnCurrentVirtualDesktop(target)
-                    .is_ok_and(|current| current.as_bool())
+                if matches!(state.scope, CursorScope::Window { .. })
+                    && !desktops
+                        .IsWindowOnCurrentVirtualDesktop(target)
+                        .is_ok_and(|current| current.as_bool())
                 {
+                    guard_update(&mut guard, false)?;
                     let _ = ShowWindow(window.0, SW_HIDE);
                     std::thread::sleep(Duration::from_millis(16));
                     continue;
                 }
-                let target_desktop = desktops.GetWindowDesktopId(target)?;
-                if desktops.GetWindowDesktopId(window.0)? != target_desktop {
-                    let _ = ShowWindow(window.0, SW_HIDE);
-                    desktops.MoveWindowToDesktop(window.0, &target_desktop)?;
+                let target_desktop = match desktops.GetWindowDesktopId(target) {
+                    Ok(id) => Some(id),
+                    Err(_) if state.scope == CursorScope::Desktop => None,
+                    Err(_) => {
+                        guard_update(&mut guard, false)?;
+                        let _ = ShowWindow(window.0, SW_HIDE);
+                        std::thread::sleep(Duration::from_millis(16));
+                        continue;
+                    }
+                };
+                match desktops.GetWindowDesktopId(window.0) {
+                    Ok(overlay_desktop)
+                        if target_desktop.is_some_and(|id| overlay_desktop != id) =>
+                    {
+                        let _ = ShowWindow(window.0, SW_HIDE);
+                        desktops.MoveWindowToDesktop(
+                            window.0,
+                            &target_desktop.expect("checked above"),
+                        )?;
+                    }
+                    Ok(_) => {}
+                    // Explorer does not register this nonactivating tool window
+                    // as an application view. Gate its presentation by the
+                    // verified target instead of requiring its own workspace ID.
+                    Err(error) if error.code().0 == 0x8002802B_u32 as i32 => {}
+                    Err(_) => {
+                        guard_update(&mut guard, false)?;
+                        let _ = ShowWindow(window.0, SW_HIDE);
+                        std::thread::sleep(Duration::from_millis(16));
+                        continue;
+                    }
                 }
             }
             let now = std::time::Instant::now();
@@ -453,6 +545,24 @@ fn run_native() -> Result<()> {
             bitmap.upload(image.data(), origin, placement.bounds);
             bitmap.present(window.0, origin)?;
             let _ = ShowWindow(window.0, SW_SHOWNOACTIVATE);
+            let mut hide = policy != overlay::PhysicalCursorPolicy::Preserve;
+            if let CursorScope::Window { window_id, .. } = state.scope {
+                let target = HWND(window_id as usize as *mut _);
+                let visible_at = |point: POINT| {
+                    let hit = WindowFromPoint(point);
+                    hit == window.0 || GetAncestor(hit, GA_ROOT) == target
+                };
+                // A covered soft hotspot cannot substitute for the real pointer.
+                hide &= visible_at(POINT {
+                    x: position.0.round() as i32,
+                    y: position.1.round() as i32,
+                });
+                if policy == overlay::PhysicalCursorPolicy::HideWithinScope {
+                    let mut pointer = POINT::default();
+                    hide &= GetCursorPos(&mut pointer).is_ok() && visible_at(pointer);
+                }
+            }
+            guard_update(&mut guard, hide)?;
             std::thread::sleep(Duration::from_millis(16));
         }
     }

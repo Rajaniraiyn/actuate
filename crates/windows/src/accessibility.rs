@@ -17,7 +17,7 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 pub struct Accessibility {
     automation: Option<IUIAutomation>,
     elements: Vec<(ElementRef, IUIAutomationElement, i32, u64)>,
-    roots: HashMap<(i32, u64), ElementRef>,
+    roots: HashMap<(i32, u64, Option<u64>), ElementRef>,
     identities: HashMap<(i32, u64, Vec<i32>), usize>,
     session: String,
     next_id: u64,
@@ -140,8 +140,63 @@ impl Accessibility {
         Ok(element)
     }
     pub fn inspect(&mut self, reference: &ElementRef) -> Result<Node> {
+        let _dpi = super::windows::DpiGuard::new()?;
         let element = self.resolve(reference)?.clone();
-        self.node(&element)
+        let mut node = self.node(&element)?;
+        let mut point = windows_api::Win32::Foundation::POINT::default();
+        match unsafe { element.GetClickablePoint(&mut point) } {
+            Ok(available) if available.as_bool() => {
+                node.attributes.insert(
+                    "clickable_point".into(),
+                    json!({"x":point.x,"y":point.y,"coordinate_space":"physical_desktop_pixels"}),
+                );
+            }
+            Ok(_) => {
+                node.attributes
+                    .insert("clickable_point".into(), Value::Null);
+            }
+            Err(error) => node
+                .issues
+                .push(json!({"attribute":"clickable_point","error":error.to_string()})),
+        }
+        Ok(node)
+    }
+    /// UIA desktop children include shell/XAML roots omitted by EnumWindows.
+    /// This is bounded root discovery, not a complete desktop-tree snapshot.
+    pub fn desktop_roots(&mut self) -> Result<Value> {
+        let _dpi = super::windows::DpiGuard::new()?;
+        let root = unsafe { self.automation().GetRootElement() }.map_err(super::native)?;
+        let walker = unsafe { self.automation().RawViewWalker() }.map_err(super::native)?;
+        let mut next = unsafe { walker.GetFirstChildElement(&root) };
+        let mut nodes = vec![];
+        let mut issues = vec![];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut attempted = 0;
+        loop {
+            match next {
+                Ok(element) => {
+                    if attempted >= 512 || std::time::Instant::now() >= deadline {
+                        issues.push(json!({"reason":"root_discovery_limit"}));
+                        break;
+                    }
+                    attempted += 1;
+                    match self.node(&element) {
+                        Ok(node) => nodes.push(node),
+                        Err(error) => issues.push(json!({"reason":"node_query","error":error})),
+                    }
+                    next = unsafe { walker.GetNextSiblingElement(&element) };
+                }
+                Err(error) if error.code().0 == 0 || error.code().0 == 0x80004003_u32 as i32 => {
+                    break;
+                }
+                Err(error) => {
+                    issues.push(json!({"reason":"root_query","error":error.to_string()}));
+                    break;
+                }
+            }
+        }
+        let complete = issues.is_empty() && nodes.iter().all(|node| node.issues.is_empty());
+        Ok(json!({"roots":nodes,"complete":complete,"issues":issues}))
     }
     fn node(&mut self, element: &IUIAutomationElement) -> Result<Node> {
         let reference = self.intern(element)?;
@@ -175,6 +230,12 @@ impl Accessibility {
                 element.CurrentIsPassword().map(|v| v.as_bool())
             );
             property!("pid", element.CurrentProcessId());
+            property!(
+                "native_window_handle",
+                element
+                    .CurrentNativeWindowHandle()
+                    .map(|h| h.0 as usize as u64)
+            );
             property!("bounds", element.CurrentBoundingRectangle().map(|r| json!({"x":r.left,"y":r.top,"width":r.right-r.left,"height":r.bottom-r.top,"coordinate_space":"physical_desktop_pixels"})));
         }
         let mut actions = vec![];
@@ -188,27 +249,26 @@ impl Accessibility {
             {
                 actions.push("invoke".into());
             }
-            if element
-                .GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
-                .is_ok()
+            if let Ok(pattern) =
+                element.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
             {
                 actions.push("toggle".into());
+                property!("toggle_state", pattern.CurrentToggleState().map(|v| v.0));
             }
-            if element
-                .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
-                    UIA_SelectionItemPatternId,
-                )
-                .is_ok()
-            {
+            if let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
+                UIA_SelectionItemPatternId,
+            ) {
                 actions.push("select".into());
+                property!("selected", pattern.CurrentIsSelected().map(|v| v.as_bool()));
             }
-            if element
-                .GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(
-                    UIA_ExpandCollapsePatternId,
-                )
-                .is_ok()
-            {
+            if let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(
+                UIA_ExpandCollapsePatternId,
+            ) {
                 actions.extend(["expand".into(), "collapse".into()]);
+                property!(
+                    "expand_collapse_state",
+                    pattern.CurrentExpandCollapseState().map(|v| v.0)
+                );
             }
             if element
                 .GetCurrentPatternAs::<IUIAutomationScrollItemPattern>(UIA_ScrollItemPatternId)
@@ -292,6 +352,20 @@ impl Discover for Accessibility {
 }
 impl Observe for Accessibility {
     fn observe(&mut self, request: ObserveRequest) -> Result<Snapshot> {
+        self.observe_windows(request, None)
+    }
+}
+impl Accessibility {
+    /// Restrict observation to one verified HWND owned by request.pid.
+    pub fn observe_window(&mut self, request: ObserveRequest, window_id: u64) -> Result<Snapshot> {
+        self.observe_windows(request, Some(window_id))
+    }
+
+    fn observe_windows(
+        &mut self,
+        request: ObserveRequest,
+        window_id: Option<u64>,
+    ) -> Result<Snapshot> {
         if request.pid <= 0
             || request.max_nodes == 0
             || request.max_nodes > 20_000
@@ -303,10 +377,34 @@ impl Observe for Accessibility {
             ));
         }
         let _dpi = super::windows::DpiGuard::new()?;
-        let windows: Vec<_> = super::discover_windows()?
-            .into_iter()
-            .filter(|w| w.pid == request.pid as u32)
-            .collect();
+        let windows: Vec<u64> = if let Some(id) = window_id {
+            use windows_api::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindow};
+            let raw = usize::try_from(id).map_err(|_| {
+                super::error(
+                    "target_not_found",
+                    "Window handle exceeds native pointer width",
+                )
+            })?;
+            let handle = HWND(raw as *mut _);
+            let mut owner = 0;
+            if id == 0
+                || !unsafe { IsWindow(Some(handle)) }.as_bool()
+                || unsafe { GetWindowThreadProcessId(handle, Some(&mut owner)) } == 0
+                || owner != request.pid as u32
+            {
+                return Err(super::error(
+                    "target_not_found",
+                    "Window does not belong to the requested process",
+                ));
+            }
+            vec![id]
+        } else {
+            super::discover_windows()?
+                .into_iter()
+                .filter(|w| w.pid == request.pid as u32)
+                .map(|w| w.window_id)
+                .collect()
+        };
         if windows.is_empty() {
             return Err(super::error(
                 "target_not_found",
@@ -316,6 +414,7 @@ impl Observe for Accessibility {
         let process_key = (
             request.pid,
             super::windows::process_generation(request.pid as u32)?,
+            window_id,
         );
         let root = if let Some(root) = self.roots.get(&process_key) {
             root.clone()
@@ -343,12 +442,12 @@ impl Observe for Accessibility {
         for window in windows.into_iter().rev() {
             match unsafe {
                 self.automation()
-                    .ElementFromHandle(HWND(window.window_id as usize as *mut _))
+                    .ElementFromHandle(HWND(window as usize as *mut _))
             } {
                 Ok(element) => pending.push((element, 0usize, 1usize)),
                 Err(e) => {
                     complete = false;
-                    issues.push(json!({"window_id":window.window_id,"error":e.to_string()}));
+                    issues.push(json!({"window_id":window,"error":e.to_string()}));
                 }
             }
         }
@@ -369,7 +468,16 @@ impl Observe for Accessibility {
                 issues.push(json!({"reason":"depth_limit"}));
                 continue;
             }
-            let node = self.node(&element)?;
+            let node = match self.node(&element) {
+                Ok(node) => node,
+                Err(error) => {
+                    complete = false;
+                    nodes[parent]
+                        .issues
+                        .push(json!({"reason":"node_query","error":error}));
+                    continue;
+                }
+            };
             if !visited.insert(node.reference.clone()) {
                 complete = false;
                 issues.push(json!({"reason":"repeated_native_element","reference":node.reference}));
@@ -383,7 +491,9 @@ impl Observe for Accessibility {
                 nodes[index].issues.push(json!({"reason":"depth_limit"}));
                 continue;
             }
-            // UIA returns a null interface as E_POINTER at the end of a child list.
+            // A successful COM call can return a null interface at list end.
+            // windows-rs represents that as an Error with S_OK; some providers
+            // use E_POINTER instead. Neither denotes a failed traversal here.
             let mut child = unsafe { walker.GetFirstChildElement(&element) };
             let mut children = vec![];
             while let Ok(current) = child.clone() {
@@ -401,6 +511,7 @@ impl Observe for Accessibility {
                 children.push(current);
             }
             if let Err(e) = child
+                && e.code().0 != 0
                 && e.code().0 != 0x80004003_u32 as i32
             {
                 complete = false;

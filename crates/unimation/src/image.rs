@@ -54,10 +54,9 @@ mod tests {
                 .unwrap()
                 .is_absolute()
         );
-        assert_eq!(
-            absolute_output(Path::new("/tmp/-x.png")).unwrap(),
-            PathBuf::from("/tmp/-x.png")
-        );
+        let absolute = std::env::temp_dir().join("-x.png");
+        assert!(absolute.is_absolute());
+        assert_eq!(absolute_output(&absolute).unwrap(), absolute);
     }
     #[test]
     fn parses_header_and_rejects_malformed_input() {

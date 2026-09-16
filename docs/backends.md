@@ -26,7 +26,7 @@ Next work:
 
 ## Windows
 
-The initial implementation and host test instructions are in [Windows validation](windows-validation.md). Native UIA handles stay on their creating thread; global input is separate from accessibility actions. The Windows crate and its Win32 overlay have cross-target type checks only; no live Windows validation has been performed.
+The initial implementation and host test instructions are in [Windows validation](windows-validation.md). Native UIA handles stay on their creating thread; global input is separate from accessibility actions. The [Windows host results](windows-host-results.md) cover isolated WPF, WinForms, Win32 and Electron fixtures. [Interactive results](windows-interactive-results.md) cover shell controls, visible overlays and Explorer transfers. Semantic UIA actions can activate targets; background focus safety and full shell coverage remain incomplete.
 
 For a fully isolated provider, start UIA on an owned MTA worker. Respect handler registration and removal ownership. Add UIA, MSAA/IA2 and Java Access Bridge as separate routes. Match native GUI-thread input routing and `AttachThreadInput` resource effects to the architecture. A timed-out COM call is not cancelled merely because Rust stopped awaiting it.
 

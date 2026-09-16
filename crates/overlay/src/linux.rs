@@ -392,7 +392,7 @@ impl Renderer {
         }
         let pulse = match self.pulse {
             Some(since) => {
-                let t = since.elapsed().as_secs_f64() / 0.45;
+                let t = since.elapsed().as_secs_f64() / crate::ripple::DURATION_SECONDS;
                 if t >= 1. || self.appearance.motion == MotionStyle::Reduced {
                     self.pulse = None;
                     self.last_activity = Instant::now();
@@ -675,18 +675,18 @@ fn draw(
         };
         pixmap.stroke_path(&path, &outline, &stroke, Transform::identity(), None);
     }
-    if let Some(t) = pulse {
-        let radius = ((5. + 17. * t) * glyph * scale) as f32;
+    if let Some(sample) = pulse.and_then(|t| crate::ripple::sample(t, appearance.motion)) {
+        let radius = (sample.radius * glyph * scale) as f32;
         if let Some(ring) =
             PathBuilder::from_circle((tip.0 * scale) as f32, (tip.1 * scale) as f32, radius)
         {
             let mut paint = Paint::default();
             paint.set_color(
-                Color::from_rgba(r as f32, g as f32, b as f32, ((1. - t) * 0.65) as f32).unwrap(),
+                Color::from_rgba(r as f32, g as f32, b as f32, sample.alpha as f32).unwrap(),
             );
             paint.anti_alias = true;
             let stroke = Stroke {
-                width: (2. * glyph * scale * (1. - t * 0.5)) as f32,
+                width: (sample.width * glyph * scale) as f32,
                 ..Default::default()
             };
             pixmap.stroke_path(&ring, &paint, &stroke, Transform::identity(), None);

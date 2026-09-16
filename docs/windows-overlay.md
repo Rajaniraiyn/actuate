@@ -1,6 +1,6 @@
 # Windows cursor overlay
 
-The Windows renderer is an experimental Win32 helper. It draws a cursor and click pulse using the existing line-delimited `CursorCommand` protocol. It does not inject input, move the hardware cursor, activate target applications, or change another window's styles.
+The Windows renderer is an experimental Win32 helper. It draws a cursor and click pulse using the existing line-delimited `CursorCommand` protocol. It does not inject input, move the hardware cursor, activate target applications, or change another window's styles. It preserves physical-cursor visibility by default; optional policies explicitly hide it while presenting the soft cursor.
 
 ## Implementation
 
@@ -14,7 +14,7 @@ The Windows renderer is an experimental Win32 helper. It draws a cursor and clic
 
 ## Limits to test on Windows
 
-There has been no live Windows validation. Cross-target checks establish API/type consistency, not compositor behavior.
+The [interactive host run](windows-interactive-results.md) verified visible animation, window following, occlusion, clipping, minimize/restore and click-through. Workspace transitions and mixed-DPI displays remain unverified. The same report documents opt-in physical-cursor hiding and tracking; preservation remains the default.
 
 Attachment refreshes approximately every 16 ms. Win32 does not give this implementation an atomic foreign-window attachment. A window can move or reorder between inspection and presentation. This is a best-effort baseline, not a guarantee of zero-frame leakage during compositor transitions. Target frame clipping is rectangular; rounded or custom-shaped windows need additional region clipping. HWND reuse by the same process cannot be distinguished using HWND and PID alone.
 

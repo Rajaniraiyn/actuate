@@ -5,6 +5,7 @@ mod accessibility;
 mod capture;
 mod input;
 mod session;
+pub mod shell;
 mod windows;
 
 pub use accessibility::Accessibility;
