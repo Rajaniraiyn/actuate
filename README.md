@@ -5,8 +5,8 @@ Give your agent the controls.
 Composable UI automation in Rust, with a CLI for agents. Inspect interfaces, take
 screenshots, click, type, scroll, and compare snapshots.
 
-macOS, Windows, Linux, Android, iOS, and iPadOS. Experimental; capabilities vary by
-platform. Windows and Linux need native testing.
+macOS, Linux, Android, iOS, and iPadOS, with Windows reserved. Experimental;
+capabilities vary by platform and are reported by `capabilities`.
 
 ## Get started
 
@@ -24,4 +24,4 @@ Output is compact text by default. Add `--json` for structured output. Keep
 
 [Architecture](architecture.md) · [Provider composition](docs/composition.md) ·
 [Session protocol](docs/session.md) · [Platform guides](docs/backends.md) ·
-[Validation](docs/validation.md)
+[Linux](docs/linux.md) · [Validation](docs/validation.md)

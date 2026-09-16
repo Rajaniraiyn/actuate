@@ -49,9 +49,12 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
             raw["accessibility_trusted"]
         );
         for record in &selected {
-            let clean = |key: &str| {
-                serde_json::to_string(record[key].as_str().unwrap_or("?"))
-                    .expect("string serialization")
+            let clean = |keys: &[&str]| {
+                let value = keys
+                    .iter()
+                    .find_map(|key| record[*key].as_str())
+                    .unwrap_or("?");
+                serde_json::to_string(value).expect("string serialization")
             };
             let marker = if record["active"] == true { "*" } else { " " };
             let windows = record["visible_window_ids"]
@@ -97,9 +100,9 @@ pub fn present_discovery(raw: &Value, scope: DiscoveryScope, format: OutputForma
             text.push_str(&format!(
                 "{marker} {} {} [{}] {} windows={windows}{spaces}{}{}\n",
                 record["pid"],
-                clean("name"),
-                clean("bundle_id"),
-                clean("activation_policy"),
+                clean(&["name"]),
+                clean(&["bundle_id", "toolkit", "bus"]),
+                clean(&["activation_policy", "application_list_source"]),
                 if record["system_ui"] == true {
                     " system-ui"
                 } else {

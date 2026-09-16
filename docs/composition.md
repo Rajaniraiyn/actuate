@@ -39,6 +39,20 @@ The type system enforces capability combinations and some coordinate distinction
 Permissions, changing UI state, stale native objects, OS compatibility and event consumption
 still need runtime checks. A dispatch receipt alone never confirms a UI result.
 
+## Shared session plumbing
+
+`unimation::session::SnapshotHistory` retains the latest 32 observations behind `Arc`,
+`FrameHistory` retains captures and invalidates them through `ActionEpoch` once any
+mutation is dispatched, `wait_attribute` polls one native read, `session::render`
+projects a snapshot for an output format, and `transport::serve` frames the JSONL
+protocol (correlation ids, parse recovery, lazy text and compact projections) for every
+platform session. `PointerAction::validate`, `Delivery::require_global`,
+`MotionPlan::for_drag`/`walk`, `Receipt::dispatched` and `Rect::local_to_global` are the
+route-independent checks every input provider shares. `NativeError::new`, `ElementRef::parse_short` and `image::png_dimensions`
+replace the per-crate copies that existed before. Presentation and queries read native
+attribute names through `schema::NativeSchema`, detected from the snapshot, so the AT-SPI
+vocabulary renders with the same code as macOS AX without aliasing either.
+
 ## Platform-owned sessions
 
 `ios::session::Session<B>` owns retained observations and typed request execution.
@@ -74,9 +88,10 @@ guest consumes its events. It is not a private per-agent cursor.
 
 `CursorVisualization` has separate command and status types. The `overlay` library owns
 the common command format, animation and child-process controller. The AppKit renderer
-is its macOS implementation. Linux, Windows, Android and iOS renderer modules currently
-return explicit unavailable errors. A queued visual command does not confirm that a
-frame rendered, and drawing never changes an input result.
+is its macOS implementation and the layer-shell renderer its Linux implementation; the
+latter also runs in-process as `overlay::linux::LayerCursor`. Windows, Android and iOS
+renderer modules currently return explicit unavailable errors. A queued visual command
+does not confirm that a frame rendered, and drawing never changes an input result.
 
 Native mouse input and a visual overlay can be selected independently. Real iPad mouse
 support can display a system pointer, as described by [Apple](https://support.apple.com/en-gb/105004).
@@ -141,5 +156,5 @@ Any reconnect layer must invalidate uncertain stream state and never replay an
 input operation whose effect is unknown.
 
 Idle float is an overlay-only drawing offset. It never dispatches HID reports or
-changes input targets. Reduced motion disables it. Its portable configuration can
-be shared by future Windows/Linux renderers; those renderers remain stubs.
+changes input targets. Reduced motion disables it. The Linux renderer shares the
+same configuration and motion geometry; the Windows renderer remains a stub.

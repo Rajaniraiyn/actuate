@@ -6,8 +6,7 @@ flag "-p --provider" help="Automation provider; native selects the host, apple-s
     arg <PROVIDER> {
         choices {
             choice native
-            choice macos
-            choice apple-simulator
+            choice linux
             choice apple-device
             choice android
         }
@@ -78,12 +77,6 @@ cmd apple help="Apple resource discovery; interaction uses the shared commands."
             flag "-h --help" help="Print help" action=help builtin=#true
         }
     }
-    cmd simulators help="Inspect installed simulators without booting or installing anything." subcommand_required=#true {
-        flag "-h --help" help="Print help" action=help builtin=#true
-        cmd list help="List native runtime, device-type and device records." {
-            flag "-h --help" help="Print help" action=help builtin=#true
-        }
-    }
 }
 cmd discover help="List running applications and accessibility permission state." {
     flag --scope default=all {
@@ -132,7 +125,7 @@ cmd view help="Render a saved native snapshot without changing its references." 
     flag "-h --help" help="Print help" action=help builtin=#true
     arg <SNAPSHOT>
 }
-cmd capture help="Capture the main display or an explicitly selected display/window." {
+cmd capture help="Capture the main display or an explicitly selected display/window. On Linux, --display is an output index and --window a Hyprland window handle." {
     flag --display {
         arg <DISPLAY>
     }

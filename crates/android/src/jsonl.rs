@@ -6,12 +6,11 @@ use std::{
     io::{BufRead, Write},
     path::{Path, PathBuf},
 };
-use unimation::{Effect, OutputFormat, Result};
+use unimation::{Effect, OutputFormat, Result, transport::ValueReply};
 
 pub fn capture_file<D: CommandTransport>(device: &mut Android<D>, path: &Path) -> Result<Value> {
     let bytes = device.capture_png()?;
-    let width = u32::from_be_bytes(bytes[16..20].try_into().expect("validated PNG header"));
-    let height = u32::from_be_bytes(bytes[20..24].try_into().expect("validated PNG header"));
+    let (width, height) = unimation::image::png_dimensions(&bytes)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -55,37 +54,12 @@ fn dispatch<D: CommandTransport>(device: &mut Android<D>, mut request: Value) ->
 pub fn serve<D: CommandTransport>(
     device: &mut Android<D>,
     reader: impl BufRead,
-    mut writer: impl Write,
+    writer: impl Write,
     format: OutputFormat,
 ) -> std::io::Result<()> {
-    for line in reader.lines() {
-        let line = line?;
-        let request = serde_json::from_str::<Value>(&line);
-        let id = request.as_ref().ok().and_then(|v| v.get("id")).cloned();
-        let result = request
-            .map_err(|e| error("invalid_request", e, Effect::None))
-            .and_then(|v| dispatch(device, v));
-        let mut reply = match result {
-            Ok(value) => json!({"result":value}),
-            Err(error) => json!({"error":error}),
-        };
-        if let Some(id) = id {
-            reply["id"] = id;
-        }
-        if format == OutputFormat::Text {
-            writeln!(
-                writer,
-                "--- response id={} ---",
-                reply.get("id").unwrap_or(&Value::Null)
-            )?;
-        }
-        unimation::output::write_value(&mut writer, &reply, format)?;
-        if format == OutputFormat::Text {
-            writeln!(writer, "--- end ---")?;
-        }
-        writer.flush()?;
-    }
-    Ok(())
+    unimation::transport::serve(reader, writer, format, |request| {
+        dispatch(device, request).map(ValueReply::from)
+    })
 }
 
 #[cfg(test)]

@@ -8,6 +8,13 @@ license.workspace = true
 unimation.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+compositor = { path = "../compositor" }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+tiny-skia = "0.12"
+rustix = { version = "1", features = ["event", "time"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = {version="0.3.2",default-features=false,features=["std","NSApplication","NSRunningApplication","NSWindow","NSPanel","NSView","NSColor","NSBezierPath","NSGraphics","NSGraphicsContext","NSShadow","NSResponder","libc","objc2-core-foundation"]}

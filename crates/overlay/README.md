@@ -1,6 +1,6 @@
 # Agent cursor overlay
 
-`overlay` provides a platform-independent cursor command protocol, animation interpolation and helper process controller. Its `unimation-overlay` executable currently renders on macOS using current objc2 AppKit bindings. Linux, Windows, iOS/iPadOS and Android renderer placeholders return `cursor_renderer_unavailable` without side effects. It starts hidden. It never posts input events or changes the shared cursor. Input delivery remains a separate provider.
+`overlay` provides a platform-independent cursor command protocol, animation interpolation and helper process controller. Its `unimation-overlay` executable renders on macOS using current objc2 AppKit bindings and on Linux through a Wayland layer-shell surface; the Linux renderer is also available in-process as `overlay::linux::LayerCursor`. Windows, iOS/iPadOS and Android renderer placeholders return `cursor_renderer_unavailable` without side effects. It starts hidden. It never posts input events or changes the shared cursor. Input delivery remains a separate provider.
 
 Build with `cargo build -p overlay`. The development binary is `target/debug/unimation-overlay`; installed integrations should pass an explicit executable path.
 
@@ -29,7 +29,7 @@ Unit tests cover interpolation endpoints/midpoint, negative desktop coordinate c
 
 `OverlayController` owns the platform-independent subprocess lifecycle and bounded queue. It implements `unimation::CursorVisualization` using the serialized `CursorCommand` type. `macos::overlay::OverlayController` remains a compatibility reexport. The controller can host any executable implementing the existing JSONL wire format; it does not select an input backend or inject events.
 
-Native renderers own desktop coordinate conversion, windows and event loops. The shared `unimation::motion::sample` function supplies bounded curved motion. `overlay::motion` reexports that geometry; there is no separate interpolation implementation. Platform renderers decide when to draw each frame. A future renderer may report `Rendered` only when it can acknowledge presentation. The current stdin transport cannot do that.
+Native renderers own desktop coordinate conversion, windows and event loops. The shared `unimation::motion::sample` function supplies bounded curved motion; there is no separate interpolation implementation. Platform renderers decide when to draw each frame. A future renderer may report `Rendered` only when it can acknowledge presentation. The current stdin transport cannot do that.
 
 
 ## Updated renderer validation
@@ -89,3 +89,7 @@ Mission Control entry/exit. The cursor panel moved by the same delta and was abs
 from the on-screen window list during Mission Control. Multiple Spaces, mixed-DPI
 displays, full-screen transitions and Dock restart still need live validation.
 The protocol acknowledges enqueueing only; it does not report compositor state.
+
+## Linux renderer
+
+The Linux renderer creates one overlay-layer `zwlr_layer_shell_v1` surface per output, sized to a 96-point box that moves with layer-surface margins. Its input region is empty and keyboard interactivity is off, so it never receives pointer events or focus. Coordinates are global logical layout coordinates from `xdg_output`. The glyph is rasterized with tiny-skia from the shared outline at the output's integer buffer scale; the shadow is a layered offset fill rather than a blur. Window scope reads the target rectangle from Hyprland IPC every 100 ms, clips the glyph to it, follows moves and hides while the window is unmapped or not on its monitor's active workspace. Overlay-layer surfaces are above every window, so occluding windows do not cover the glyph. Frames are rasterized only when the quantized position, idle offset, ring progress, appearance or clip changed, and the loop polls at 100 ms while nothing animates. The standalone executable and the in-process `LayerCursor` share this renderer; both acknowledge `queued` only.

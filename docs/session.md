@@ -2,7 +2,7 @@
 
 Run `unimation session --json` for the JSONL protocol. Without `--json`, the CLI returns a framed text transcript. Send one JSON object per line. Receive one response per line, in order. The process owns the reference namespace until EOF. An optional `id` of any JSON type is echoed on valid-JSON requests, including operation errors. Parse errors do not terminate the session.
 
-The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`.
+The authoritative request types are `unimation::SessionRequest`, `SemanticAction`, `PointerAction`, and `Delivery`, plus `macos::session::MacRequest` and `linux::session::LinuxRequest` for native extensions. Unknown fields are rejected before dispatch. Replies contain either `result` or a structured `error` with `code`, `message`, and `effect`. Framing is shared by every platform through `unimation::transport`; the tables below describe macOS names, and [the Linux guide](linux.md#session-operations) lists the Linux equivalents and additions.
 
 | Operation | Fields | Result |
 | --- | --- | --- |

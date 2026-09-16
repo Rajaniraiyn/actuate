@@ -1,6 +1,6 @@
 //! Decorative offsets only. Never feed these values into input coordinates.
-use crate::motion::MotionStyle;
 use serde::{Deserialize, Serialize};
+use unimation::motion::MotionStyle;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

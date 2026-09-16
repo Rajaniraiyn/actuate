@@ -16,6 +16,7 @@ macos = { path = "crates/macos" }
 ios = { path = "crates/ios" }
 usage = { package = "usage-rs", version = "6.9.1", default-features = false, features = ["help", "diagnostics", "completions"] }
 overlay = { path = "crates/overlay" }
+linux = { path = "crates/linux" }
 
 [patch."https://github.com/poapoauu/DroidMux"]
 droidmux-pairing = { path = "target/patched-deps/droidmux-pairing" }

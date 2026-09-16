@@ -3,7 +3,9 @@ mod macos;
 fn main() {
     #[cfg(target_os = "macos")]
     macos::run();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    overlay::linux::run();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         eprintln!("Native cursor renderer is unavailable on this platform");
         std::process::exit(1);

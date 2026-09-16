@@ -10,7 +10,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use unimation::{Effect, Result};
+use unimation::Result;
 
 pub struct OverlayController {
     child: Option<Child>,
@@ -18,11 +18,7 @@ pub struct OverlayController {
     writer: Option<JoinHandle<()>>,
 }
 fn failure(message: impl ToString) -> unimation::NativeError {
-    unimation::NativeError {
-        code: "overlay_failed".into(),
-        message: message.to_string(),
-        effect: Effect::None,
-    }
+    unimation::NativeError::new("overlay_failed", message)
 }
 fn serialize(command: Value) -> Result<Vec<u8>> {
     let typed: CursorCommand = serde_json::from_value(command.clone()).map_err(failure)?;

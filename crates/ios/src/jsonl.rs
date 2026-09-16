@@ -6,14 +6,13 @@ use std::{
     io::{BufRead, Write},
     path::Path,
 };
-use unimation::{ElementRef, NativeError, OutputFormat, Result, presentation};
+use unimation::{OutputFormat, Result, Snapshot, transport};
 
 // Serialize borrowed typed results directly to the output stream. In particular,
 // do not clone snapshots into a second serde_json::Value tree before encoding.
-struct Encoded<'a>(&'a Response);
-impl Serialize for Encoded<'_> {
+impl Serialize for Response {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        match self.0 {
+        match self {
             Response::Snapshot(v)=>v.as_ref().serialize(serializer),
             Response::Text(v)=>v.serialize(serializer),
             Response::Compact(v)=>v.serialize(serializer),
@@ -25,29 +24,24 @@ impl Serialize for Encoded<'_> {
         }
     }
 }
-#[derive(Serialize)]
-struct Reply<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<&'a Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Encoded<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<&'a NativeError>,
+impl transport::Reply for Response {
+    fn snapshot(&self) -> Option<&Snapshot> {
+        match self {
+            Response::Snapshot(snapshot) => Some(snapshot),
+            _ => None,
+        }
+    }
+    fn text(&self) -> Option<&str> {
+        match self {
+            Response::Text(text) => Some(text),
+            _ => None,
+        }
+    }
 }
 pub fn dispatch<B: SessionBackend>(session: &mut Session<B>, mut value: Value) -> Result<Response> {
-    if let Some(object) = value.as_object_mut() {
-        object.remove("id");
-    }
-    if let Some(short) = value.get("target").and_then(Value::as_str) {
-        let id = short
-            .strip_prefix("@e")
-            .and_then(|s| s.parse::<u64>().ok())
-            .ok_or_else(|| fail("invalid_request", "Expected @e followed by an integer"))?;
-        value["target"] = json!(ElementRef {
-            session: session.snapshot(None)?.root.session.clone(),
-            id
-        });
-    }
+    transport::prepare(&mut value, || {
+        Ok(session.snapshot(None)?.root.session.clone())
+    })?;
     let request: Request =
         serde_json::from_value(value).map_err(|e| fail("invalid_request", e.to_string()))?;
     session.execute(request)
@@ -71,27 +65,13 @@ pub fn run_formatted(
     Ok(())
 }
 /// Shared one-shot command output, without a JSONL response envelope.
-pub fn write_result(response: &Response, mut writer: impl Write) -> std::io::Result<()> {
-    match response {
-        Response::Text(text) => writeln!(writer, "{text}")?,
-        _ => {
-            serde_json::to_writer(&mut writer, &Encoded(response))
-                .map_err(std::io::Error::other)?;
-            writer.write_all(b"\n")?;
-        }
-    }
-    writer.flush()
-}
 pub fn write_result_formatted(
     response: &Response,
     format: OutputFormat,
-    writer: impl Write,
+    mut writer: impl Write,
 ) -> std::io::Result<()> {
-    if format != OutputFormat::Text || matches!(response, Response::Text(_)) {
-        return write_result(response, writer);
-    }
-    let value = serde_json::to_value(Encoded(response)).map_err(std::io::Error::other)?;
-    unimation::output::write_value(writer, &value, format)
+    transport::write_reply(response, format, &mut writer)?;
+    writer.flush()
 }
 pub fn serve<B: SessionBackend>(
     session: &mut Session<B>,
@@ -103,60 +83,8 @@ pub fn serve<B: SessionBackend>(
 pub fn serve_formatted<B: SessionBackend>(
     session: &mut Session<B>,
     reader: impl BufRead,
-    mut writer: impl Write,
+    writer: impl Write,
     format: OutputFormat,
 ) -> std::io::Result<()> {
-    for line in reader.lines() {
-        let line = line?;
-        let value = serde_json::from_str::<Value>(&line);
-        let id = value.as_ref().ok().and_then(|v| v.get("id")).cloned();
-        let result = value
-            .map_err(|e| fail("invalid_request", e.to_string()))
-            .and_then(|v| dispatch(session, v))
-            .and_then(|response| {
-                if format != OutputFormat::Json
-                    && let Response::Snapshot(snapshot) = &response
-                {
-                    let view = presentation::render_snapshot(snapshot, &Default::default())?;
-                    return Ok(if format == OutputFormat::Text {
-                        Response::Text(presentation::render_snapshot_text(&view))
-                    } else {
-                        Response::Compact(view)
-                    });
-                }
-                Ok(response)
-            });
-        if format == OutputFormat::Text {
-            writeln!(
-                writer,
-                "--- response id={} ---",
-                id.as_ref().unwrap_or(&Value::Null)
-            )?;
-            match &result {
-                Ok(response) => write_result_formatted(response, format, &mut writer)?,
-                Err(error) => {
-                    unimation::output::write_value(&mut writer, &json!({"error":error}), format)?
-                }
-            }
-            writeln!(writer, "--- end ---")?;
-            writer.flush()?;
-            continue;
-        }
-        let reply = match &result {
-            Ok(v) => Reply {
-                id: id.as_ref(),
-                result: Some(Encoded(v)),
-                error: None,
-            },
-            Err(e) => Reply {
-                id: id.as_ref(),
-                result: None,
-                error: Some(e),
-            },
-        };
-        serde_json::to_writer(&mut writer, &reply).map_err(std::io::Error::other)?;
-        writer.write_all(b"\n")?;
-        writer.flush()?;
-    }
-    Ok(())
+    transport::serve(reader, writer, format, |request| dispatch(session, request))
 }

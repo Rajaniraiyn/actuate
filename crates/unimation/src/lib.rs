@@ -5,9 +5,14 @@ pub mod actions;
 pub mod diff;
 pub mod discovery;
 pub mod geometry;
+pub mod image;
 pub mod motion;
 pub mod presentation;
 pub mod query;
+pub mod schema;
+pub mod session;
+pub mod transport;
+pub mod values;
 pub mod wait;
 pub use actions::*;
 // Independent provider capabilities. Native handles never cross this boundary.
@@ -30,11 +35,52 @@ pub struct ElementRef {
     pub session: String,
     pub id: u64,
 }
+impl ElementRef {
+    /// Expands a session-local `@e<number>` display reference. The caller
+    /// still resolves it against live provider state; parsing proves nothing.
+    pub fn parse_short(session: &str, short: &str) -> Result<Self> {
+        let id = short
+            .strip_prefix("@e")
+            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                NativeError::new(
+                    "invalid_reference",
+                    "Expected a session-local @e<number> reference",
+                )
+            })?;
+        Ok(Self {
+            session: session.into(),
+            id,
+        })
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativeError {
     pub code: String,
     pub message: String,
     pub effect: Effect,
+}
+impl NativeError {
+    /// An error with no native side effect. Use `with_effect` after a call
+    /// that may have mutated native state.
+    pub fn new(code: impl Into<String>, message: impl ToString) -> Self {
+        Self {
+            code: code.into(),
+            message: message.to_string(),
+            effect: Effect::None,
+        }
+    }
+    pub fn with_effect(mut self, effect: Effect) -> Self {
+        self.effect = effect;
+        self
+    }
+    pub fn invalid_request(message: impl ToString) -> Self {
+        Self::new("invalid_request", message)
+    }
+    pub fn unsupported(message: impl ToString) -> Self {
+        Self::new("unsupported", message)
+    }
 }
 impl std::fmt::Display for NativeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -54,6 +100,22 @@ pub enum Effect {
 pub struct Receipt {
     pub effect: Effect,
     pub route: String,
+}
+impl Receipt {
+    /// Native events were handed to the route; consumption is not verified.
+    pub fn dispatched(route: impl Into<String>) -> Self {
+        Self {
+            effect: Effect::Dispatched,
+            route: route.into(),
+        }
+    }
+    /// Nothing was sent, for example an empty text request.
+    pub fn none(route: impl Into<String>) -> Self {
+        Self {
+            effect: Effect::None,
+            route: route.into(),
+        }
+    }
 }
 /// Attribute values retain native type tags, unsupported values and read errors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +144,21 @@ pub struct ObserveRequest {
     pub max_nodes: usize,
     #[serde(default = "default_max_depth")]
     pub max_depth: usize,
+}
+impl ObserveRequest {
+    pub fn new(pid: i32, budget: ObservationBudget) -> Self {
+        Self {
+            pid,
+            max_nodes: budget.max_nodes,
+            max_depth: budget.max_depth,
+        }
+    }
+    pub fn budget(&self) -> ObservationBudget {
+        ObservationBudget {
+            max_nodes: self.max_nodes,
+            max_depth: self.max_depth,
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -127,6 +204,24 @@ pub enum SemanticAction {
 pub enum Delivery {
     Global {},
     Process { pid: i32 },
+}
+impl Delivery {
+    /// Routes that only exist for the shared seat reject process delivery
+    /// with the reason a caller needs to pick another route.
+    pub fn require_global(&self, reason: &str) -> Result<()> {
+        match self {
+            Self::Global {} => Ok(()),
+            Self::Process { .. } => Err(NativeError::unsupported(reason)),
+        }
+    }
+}
+/// Which part of an application a snapshot request observes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotScope {
+    #[default]
+    Application,
+    FocusedWindow,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,15 +281,6 @@ pub trait PointerInput {
 }
 pub trait TextInput {
     fn type_text(&mut self, delivery: Delivery, text: &str) -> Result<Receipt>;
-}
-pub trait Interactive: PointerInput + TextInput {}
-impl<T: PointerInput + TextInput> Interactive for T {}
-/// Each field may use an independently selected implementation.
-pub struct Providers<O, S, P, T> {
-    pub observe: O,
-    pub semantic: S,
-    pub pointer: P,
-    pub text: T,
 }
 
 /// Extra capabilities define their own request/response types until a portable
@@ -356,6 +442,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn short_references_require_the_display_form() {
+        assert_eq!(ElementRef::parse_short("s", "@e12").unwrap().id, 12);
+        for bad in ["@e", "e12", "@e-1", "@e1.5", "12"] {
+            assert_eq!(
+                ElementRef::parse_short("s", bad).unwrap_err().code,
+                "invalid_reference"
+            );
+        }
+        let error = NativeError::new("x", 5).with_effect(Effect::Unknown);
+        assert!(matches!(error.effect, Effect::Unknown));
+        assert_eq!(error.message, "5");
+    }
     #[test]
     fn observation_defaults_match_cli_contract() {
         let SessionRequest::Observe { request } =

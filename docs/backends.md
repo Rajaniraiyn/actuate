@@ -30,7 +30,17 @@ Start UIA on an owned MTA worker. Respect handler registration and removal owner
 
 ## Linux
 
-Keep AT-SPI observation separate from X11, portal/libei, compositor-specific and uinput delivery. Negotiate Wayland devices and coordinate regions. No implicit switch from session-scoped delivery to global input. Handle session revocation and device removal during gestures.
+The `linux` crate implements AT-SPI2 observation and semantic actions over D-Bus, Wayland virtual-pointer and virtual-keyboard delivery, XTest delivery on X11 and Xwayland, screencopy and image-copy-capture frames, Hyprland window discovery and window-targeted shortcuts, and a layer-shell cursor renderer. `LinuxSession` composes them with the same request surface as `MacSession`. Every route is explicit; there is no switch from window-targeted or X-server-local delivery to the shared compositor seat. See [the Linux guide](linux.md).
+
+Shared desktop primitives live in the `compositor` crate: Hyprland IPC over its socket and Lua dispatchers, plus Wayland registry, output geometry, seat keymap and shared-memory buffer helpers used by both the providers and the renderer.
+
+Next work:
+
+- Portal `RemoteDesktop`/libei delivery for compositors without the wlr virtual-device protocols.
+- A compositor plugin route for per-window pointer events that leave the user's cursor untouched, the Linux analogue of SkyLight.
+- AT-SPI event subscriptions for reference retirement and bounded handle retention.
+- X11 ARGB overlay rendering for native X sessions; the layer-shell renderer covers Wayland.
+- Hotplugged outputs and seat changes during a session.
 
 ## Android and iOS
 

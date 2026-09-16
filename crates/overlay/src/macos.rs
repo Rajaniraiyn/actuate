@@ -3,9 +3,9 @@ mod overview;
 use overlay::CursorScope;
 use overlay::{
     CursorAppearance, CursorCommand as Command,
-    motion::{self, MotionStyle},
     shape::{HOTSPOT, OUTLINE, UNIT},
 };
+use unimation::motion::{self, MotionStyle};
 const SIZE: f64 = 96.;
 const TIP: (f64, f64) = (96., 160.);
 fn appkit_origin(x: f64, y: f64, main_height: f64) -> (f64, f64) {
